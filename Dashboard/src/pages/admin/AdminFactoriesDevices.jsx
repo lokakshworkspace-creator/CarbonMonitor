@@ -7,6 +7,8 @@
 
 import { useEffect, useState } from 'react'
 
+import EmptyState from '../../components/EmptyState.jsx'
+import { FactoryIcon } from '../../components/icons.jsx'
 import {
   adminCreateDevice,
   adminCreateFactory,
@@ -88,7 +90,12 @@ export default function AdminFactoriesDevices() {
   return (
     <>
       <section className="section">
-        <h2>Factories</h2>
+        <h2 className="with-icon">
+          <span className="card-icon-badge is-factory" aria-hidden="true">
+            <FactoryIcon />
+          </span>
+          Factories
+        </h2>
         {error && <div className="empty error-text">{error}</div>}
 
         <form className="card card-pad admin-form" onSubmit={handleCreateFactory}>
@@ -133,7 +140,7 @@ export default function AdminFactoriesDevices() {
 
         <div className="card">
           {factories.length === 0 ? (
-            <div className="empty">No factories yet.</div>
+            <EmptyState>No factories yet.</EmptyState>
           ) : (
             <table className="table">
               <thead>
@@ -202,7 +209,7 @@ export default function AdminFactoriesDevices() {
 
         <div className="card">
           {devices.length === 0 ? (
-            <div className="empty">No devices registered yet.</div>
+            <EmptyState>No devices registered yet.</EmptyState>
           ) : (
             <table className="table">
               <thead>

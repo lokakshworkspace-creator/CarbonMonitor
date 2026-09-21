@@ -25,6 +25,7 @@ import {
   YAxis,
 } from 'recharts'
 
+import EmptyState from './EmptyState.jsx'
 import { LEVEL_COLOR } from '../lib/levels.js'
 
 // Matches Co2Chart.jsx's constants exactly, plus a muted grey reserved
@@ -44,7 +45,7 @@ export default function WeeklyAnalytics({ days, thresholds, error }) {
   // Doubles as the loading state (see useAnalytics' docstring) and the
   // genuinely-no-data state - both render the same "nothing to show yet".
   if (days.length === 0) {
-    return <div className="empty">No readings in this window yet.</div>
+    return <EmptyState>No readings in this window yet.</EmptyState>
   }
 
   // Aggregated from the server's own per-day numbers (count-weighted

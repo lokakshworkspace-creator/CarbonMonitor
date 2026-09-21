@@ -9,6 +9,8 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
+import AppFooter from '../components/AppFooter.jsx'
+import { HeroScene, LeafIcon } from '../components/icons.jsx'
 import { useAuth } from '../context/authContext.js'
 
 export default function Login() {
@@ -35,43 +37,50 @@ export default function Login() {
   }
 
   return (
-    <div className="login-page">
-      <form className="card login-form" onSubmit={handleSubmit}>
-        <div className="login-brand">
-          <div className="brand-mark">CO₂</div>
-          <h1>Carbon Monitor</h1>
-        </div>
-        <p className="page-subtitle login-subtitle">Sign in to continue.</p>
+    <div className="login-page hero-banner is-login">
+      <HeroScene className="hero-banner-svg" />
+      <div className="hero-banner-scrim" />
+      <div>
+        <form className="card login-form" onSubmit={handleSubmit}>
+          <div className="login-brand">
+            <div className="brand-mark">CO₂</div>
+            <h1>Carbon Monitor</h1>
+          </div>
+          <p className="page-subtitle login-subtitle">Sign in to continue.</p>
 
-        {error && <div className="empty error-text login-error">{error}</div>}
+          {error && <div className="empty error-text login-error">{error}</div>}
 
-        <label className="login-field">
-          <span>Username</span>
-          <input
-            className="input"
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-            autoFocus
-            autoComplete="username"
-            required
-          />
-        </label>
-        <label className="login-field">
-          <span>Password</span>
-          <input
-            className="input"
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            autoComplete="current-password"
-            required
-          />
-        </label>
+          <label className="login-field">
+            <span>Username</span>
+            <input
+              className="input"
+              value={username}
+              onChange={(event) => setUsername(event.target.value)}
+              autoFocus
+              autoComplete="username"
+              required
+            />
+          </label>
+          <label className="login-field">
+            <span>Password</span>
+            <input
+              className="input"
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              autoComplete="current-password"
+              required
+            />
+          </label>
 
-        <button type="submit" className="btn-verify" disabled={pending}>
-          {pending ? 'Signing in…' : 'Sign in'}
-        </button>
-      </form>
+          <button type="submit" className="btn-verify" disabled={pending}>
+            <LeafIcon size={13} />
+            {pending ? 'Signing in…' : 'Sign in'}
+          </button>
+        </form>
+
+        <AppFooter />
+      </div>
     </div>
   )
 }

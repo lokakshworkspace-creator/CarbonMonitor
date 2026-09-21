@@ -14,6 +14,8 @@ import { useParams } from 'react-router-dom'
 
 import Co2Chart from '../../components/Co2Chart.jsx'
 import Co2Gauge from '../../components/Co2Gauge.jsx'
+import EmptyState from '../../components/EmptyState.jsx'
+import { ChartIcon } from '../../components/icons.jsx'
 import WeeklyAnalytics from '../../components/WeeklyAnalytics.jsx'
 import { useAnalytics } from '../../hooks/useAnalytics.js'
 import { useReadings } from '../../hooks/useReadings.js'
@@ -93,7 +95,7 @@ export default function FactoryDetail() {
 
       {error && <div className="empty error-text">{error}</div>}
       {!error && effectiveDevices.length === 0 && (
-        <div className="empty">No devices registered to this factory yet.</div>
+        <EmptyState>No devices registered to this factory yet.</EmptyState>
       )}
 
       {effectiveDevices.length > 0 && (
@@ -126,7 +128,12 @@ export default function FactoryDetail() {
 
           <section className="section">
             <div className="section-head">
-              <h2>{chartTab === 'live' ? 'Recent readings (ppm)' : `Last ${ANALYTICS_DAYS} days (ppm)`}</h2>
+              <h2 className="with-icon">
+                <span className="card-icon-badge is-chart" aria-hidden="true">
+                  <ChartIcon />
+                </span>
+                {chartTab === 'live' ? 'Recent readings (ppm)' : `Last ${ANALYTICS_DAYS} days (ppm)`}
+              </h2>
               <div className="filters">
                 {CHART_TABS.map(({ key, label }) => (
                   <button

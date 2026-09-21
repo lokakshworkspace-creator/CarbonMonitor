@@ -8,6 +8,8 @@
 
 import { useEffect, useState } from 'react'
 
+import EmptyState from '../../components/EmptyState.jsx'
+import { LeafIcon } from '../../components/icons.jsx'
 import { adminCreateUser, adminListRegions, adminListUsers, adminUpdateUser } from '../../services/api.js'
 
 const EMPTY_FORM = { username: '', email: '', password: '', regionId: '' }
@@ -116,13 +118,14 @@ export default function AdminUsers() {
           ))}
         </select>
         <button type="submit" className="btn-verify" disabled={pending}>
+          <LeafIcon size={13} />
           {pending ? 'Creating…' : 'Create Regional Head'}
         </button>
       </form>
 
       <div className="card">
         {users.length === 0 ? (
-          <div className="empty">No users yet.</div>
+          <EmptyState>No users yet.</EmptyState>
         ) : (
           <table className="table">
             <thead>

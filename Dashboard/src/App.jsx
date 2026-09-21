@@ -22,7 +22,9 @@
 
 import { NavLink, Navigate, Outlet, Route, Routes } from 'react-router-dom'
 
+import AppFooter from './components/AppFooter.jsx'
 import ConnectionStatus from './components/ConnectionStatus.jsx'
+import { HeroScene } from './components/icons.jsx'
 import NotificationBell from './components/NotificationBell.jsx'
 import RequireAuth from './components/RequireAuth.jsx'
 import { useAuth } from './context/authContext.js'
@@ -102,7 +104,13 @@ function Shell() {
   return (
     <div className="app">
       <aside className="sidebar">
-        <div className="brand">
+        {/* Hero background sits behind .brand only, faded back to the
+            sidebar's own solid panel color before the nav links below -
+            see styles.css's .hero-banner.is-sidebar and icons.jsx's
+            HeroScene docstring. */}
+        <div className="brand hero-banner is-sidebar">
+          <HeroScene className="hero-banner-svg" />
+          <div className="hero-banner-scrim" />
           <div className="brand-mark">CO₂</div>
           <div>
             <div className="brand-title">Carbon Monitor</div>
@@ -128,6 +136,7 @@ function Shell() {
 
         <div className="sidebar-footer">
           <ConnectionStatus />
+          <AppFooter compact />
         </div>
       </aside>
 

@@ -9,6 +9,8 @@
  * to verify what is already in the database.
  */
 
+import EmptyState from './EmptyState.jsx'
+
 const STATUS_BADGE_CLASS = {
   Verified: 'badge-online',
   Tampered: 'badge-CRITICAL',
@@ -21,10 +23,10 @@ export default function RecordPicker({ records, selectedId, onSelect, error }) {
   }
   if (records.length === 0) {
     return (
-      <div className="empty">
+      <EmptyState>
         No records yet. Publish a reading with{' '}
         <code>python tests/mqtt_test_publisher.py --scenario normal</code>
-      </div>
+      </EmptyState>
     )
   }
 

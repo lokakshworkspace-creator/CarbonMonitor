@@ -5,6 +5,8 @@
  * what the gateway actually sent.
  */
 
+import EmptyState from './EmptyState.jsx'
+
 function formatTime(isoTimestamp) {
   const date = new Date(isoTimestamp)
   if (Number.isNaN(date.getTime())) return isoTimestamp
@@ -17,10 +19,10 @@ function formatTime(isoTimestamp) {
 export default function EventFeed({ events }) {
   if (events.length === 0) {
     return (
-      <div className="empty">
+      <EmptyState>
         Waiting for events… Publish a reading with{' '}
         <code>python tests/mqtt_test_publisher.py --scenario normal</code>
-      </div>
+      </EmptyState>
     )
   }
 

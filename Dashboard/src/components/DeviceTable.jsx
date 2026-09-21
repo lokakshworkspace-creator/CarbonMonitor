@@ -6,6 +6,8 @@
  * eventually disagree and undermine the whole page.
  */
 
+import EmptyState from './EmptyState.jsx'
+
 function formatLastSeen(isoTimestamp) {
   const date = new Date(isoTimestamp)
   if (Number.isNaN(date.getTime())) return isoTimestamp
@@ -21,7 +23,7 @@ export default function DeviceTable({ devices, error }) {
     return <div className="empty error-text">{error}</div>
   }
   if (devices.length === 0) {
-    return <div className="empty">No devices have reported to the gateway yet.</div>
+    return <EmptyState>No devices have reported to the gateway yet.</EmptyState>
   }
 
   return (

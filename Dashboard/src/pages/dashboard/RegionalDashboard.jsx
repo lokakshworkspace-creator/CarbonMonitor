@@ -18,6 +18,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
+import EmptyState from '../../components/EmptyState.jsx'
+import { FactoryIcon } from '../../components/icons.jsx'
 import { useAuth } from '../../context/authContext.js'
 import { useEventStream } from '../../context/eventStreamContext.js'
 import { useThresholds } from '../../hooks/useThresholds.js'
@@ -32,6 +34,9 @@ function FactoryTile({ factory, status }) {
       className={`card factory-card${level ? ` factory-card-${level}` : ''}`}
     >
       <div className="factory-card-top">
+        <span className="card-icon-badge is-factory" aria-hidden="true">
+          <FactoryIcon />
+        </span>
         <span className={`factory-dot${level ? ` factory-dot-${level}` : ''}`} aria-hidden="true" />
         <div className="factory-card-name">{factory.name}</div>
       </div>
@@ -126,7 +131,7 @@ export default function RegionalDashboard() {
       <p className="page-subtitle">{isAdmin ? "Every region's factories." : "Your region's factories."}</p>
 
       {error && <div className="empty error-text">{error}</div>}
-      {!error && factories.length === 0 && <div className="empty">No factories yet.</div>}
+      {!error && factories.length === 0 && <EmptyState>No factories yet.</EmptyState>}
 
       {isAdmin
         ? [...factoriesByRegion.entries()].map(([regionId, regionFactories]) => (

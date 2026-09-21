@@ -18,6 +18,7 @@
 
 import { useState } from 'react'
 
+import EmptyState from './EmptyState.jsx'
 import { useNotifications } from '../hooks/useNotifications.js'
 
 const SEVERITY_LABEL = { warning: 'WARNING', critical: 'CRITICAL' }
@@ -90,7 +91,7 @@ export default function NotificationBell() {
             <span className="dim count">{notifications.length} unseen</span>
           </div>
           {notifications.length === 0 ? (
-            <div className="empty">No unseen alerts.</div>
+            <EmptyState compact>No unseen alerts.</EmptyState>
           ) : (
             <div className="notif-list">
               {notifications.map((notification) => (

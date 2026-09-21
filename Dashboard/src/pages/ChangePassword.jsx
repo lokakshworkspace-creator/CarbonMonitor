@@ -13,6 +13,7 @@
 
 import { useState } from 'react'
 
+import { LeafIcon } from '../components/icons.jsx'
 import { changePassword } from '../services/api.js'
 
 // Mirrors Gateway/models.py's CHANGE_PASSWORD_MIN_LENGTH. Kept in sync by
@@ -105,6 +106,7 @@ export default function ChangePassword() {
         </label>
 
         <button type="submit" className="btn-verify" disabled={pending}>
+          <LeafIcon size={13} />
           {pending ? 'Changing…' : 'Change password'}
         </button>
       </form>

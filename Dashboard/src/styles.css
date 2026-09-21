@@ -28,6 +28,18 @@
   --warning: #f5a623;
   --critical: #e5484d;
 
+  /* Nature/climate-action visual pass: a second accent alongside the
+     existing teal (--accent), not a replacement for it. #3F7E44 is the
+     real official UN SDG-13 "Climate Action" forest green - used here as
+     a plain accent color only. Nothing in this file reproduces the
+     official SDG-13 icon/logo itself (see .climate-badge below, an
+     original geometric mark, not the UN artwork) - see CLAUDE.md-adjacent
+     notes in AppFooter.jsx for why. --accent-2-glow is the same color at
+     an alpha useful for shadows/hover glow without a separate color-mix()
+     at every call site. */
+  --accent-2: #3f7e44;
+  --accent-2-glow: #3f7e4466;
+
   --mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
   --sans: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
 }
@@ -66,7 +78,8 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 0 6px;
+  padding: 16px 6px;
+  border-radius: 10px;
 }
 
 .brand-mark {
@@ -126,15 +139,17 @@ body {
 }
 
 .page h1 {
-  margin: 0 0 4px;
-  font-size: 22px;
+  margin: 0 0 5px;
+  font-size: 23px;
   font-weight: 650;
   letter-spacing: -0.02em;
+  line-height: 1.25;
 }
 
 .page-subtitle {
-  margin: 0 0 24px;
+  margin: 0 0 26px;
   color: var(--text-dim);
+  line-height: 1.5;
 }
 
 .placeholder {
@@ -198,6 +213,14 @@ body {
   color: var(--text-dim);
 }
 
+/* Opt-in only (see .card-icon-badge above) - most section headers stay
+   plain text, this just lets a header include one inline. */
+.section h2.with-icon {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .section-head {
   display: flex;
   align-items: center;
@@ -215,6 +238,15 @@ body {
   border: 1px solid var(--border);
   border-radius: 10px;
   overflow: hidden;
+  /* Soft depth pass: a two-layer shadow (a tight dark contact shadow plus
+     a wider, very faint glow in the existing --border color family) so
+     cards read as sitting slightly above the page rather than being flat
+     panels - subtle enough to stay unnoticed until you compare it against
+     the old flat version. */
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.35),
+    0 8px 20px -12px color-mix(in srgb, var(--border) 70%, black);
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
 }
 
 .empty {
@@ -425,12 +457,16 @@ body {
   padding: 14px 16px;
   text-decoration: none;
   color: var(--text);
-  transition: border-color 0.12s, background 0.12s;
+  transition: border-color 0.12s, background 0.12s, transform 0.12s ease, box-shadow 0.12s ease;
 }
 
 .shortcut:hover {
   border-color: var(--accent);
   background: var(--bg-panel-alt);
+  transform: translateY(-2px);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.35),
+    0 12px 24px -12px color-mix(in srgb, var(--accent) 30%, black);
 }
 
 .shortcut-label {
@@ -474,6 +510,16 @@ body {
   letter-spacing: 0.06em;
   color: var(--text-dim);
   margin-bottom: 8px;
+}
+
+/* Opt-in only, same pattern as .section h2.with-icon - a bare small icon
+   (not the larger .card-icon-badge, which would overpower text this
+   small), colored via currentColor so it always matches the label. */
+.stat-label-icon {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--accent-2);
 }
 
 .stat-value {
@@ -601,30 +647,49 @@ body {
 }
 
 .btn-verify {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
   padding: 8px 18px;
   border: none;
   border-radius: 8px;
-  background: var(--accent);
+  /* Tactile pass: a subtle two-stop gradient across the existing accent
+     tokens rather than a flat fill, plus a resting shadow so the button
+     already reads as slightly raised before any interaction. */
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 70%, var(--accent-2)));
   color: #fff;
   font-family: inherit;
   font-size: 13px;
   font-weight: 650;
   cursor: pointer;
-  transition: opacity 0.12s, transform 0.06s;
+  box-shadow: 0 2px 8px -2px color-mix(in srgb, var(--accent) 45%, transparent);
+  transition: opacity 0.12s, transform 0.12s ease, box-shadow 0.12s ease;
 }
 
 .btn-verify:hover:not(:disabled) {
-  opacity: 0.9;
+  opacity: 0.94;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px -4px color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
 .btn-verify:active:not(:disabled) {
-  transform: scale(0.98);
+  transform: scale(0.98) translateY(0);
 }
 
 .btn-verify:disabled {
   background: var(--bg-panel-alt);
   color: var(--text-dim);
+  box-shadow: none;
   cursor: not-allowed;
+}
+
+/* Icon slot inside a .btn-verify (leaf, per the brief, on confirm/save
+   actions specifically - not every button) - see components/icons.jsx.
+   currentColor so it always matches the button's own text color,
+   including in the :disabled state. */
+.btn-verify svg {
+  flex-shrink: 0;
 }
 
 /* --- Verification verdict --- */
@@ -1322,17 +1387,52 @@ body {
   border-left: 3px solid var(--border);
   text-decoration: none;
   color: var(--text);
-  transition: border-color 0.12s;
+  transition: border-color 0.12s, transform 0.12s ease, box-shadow 0.12s ease;
 }
 
 .factory-card:hover {
   border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.35),
+    0 12px 24px -12px color-mix(in srgb, var(--accent) 30%, black);
 }
 
 .factory-card-top {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* Small original inline-SVG icon badge, per card type - see
+   components/icons.jsx. Sits inline with the existing status dot/name,
+   never replaces them; purely decorative, so it's marked aria-hidden at
+   the call site. */
+.card-icon-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--accent-2) 16%, transparent);
+  color: var(--accent-2);
+}
+
+.card-icon-badge.is-leaf {
+  background: color-mix(in srgb, var(--accent-2) 16%, transparent);
+  color: var(--accent-2);
+}
+
+.card-icon-badge.is-factory {
+  background: color-mix(in srgb, var(--text-dim) 18%, transparent);
+  color: var(--text-dim);
+}
+
+.card-icon-badge.is-chart {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
 }
 
 .factory-card-name {
@@ -1379,4 +1479,109 @@ body {
 
 .factory-card-critical {
   border-left-color: var(--critical);
+}
+
+/* --- Illustrated empty states (components/EmptyState.jsx) ---
+   Applied only where a plain ".empty" text div already existed - see
+   that component's own docstring. Reuses .empty's padding/centering
+   rather than redefining it. */
+
+.empty-illustrated {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.empty-illustrated .empty-sprout {
+  opacity: 0.85;
+}
+
+.empty-illustrated-message {
+  color: var(--text-dim);
+}
+
+/* Compact variant for tight spaces (the notification panel is 320px
+   wide) - smaller illustration, tighter gap. */
+.empty-illustrated.is-compact .empty-sprout {
+  width: 32px;
+  height: 32px;
+}
+
+/* --- Hero banner (login screen + sidebar header) ---
+   A decorative, self-contained inline SVG (components/icons.jsx's
+   HeroScene) sitting behind existing content as an absolutely-positioned
+   background layer - never in the document flow, never intercepting
+   clicks (pointer-events: none), and always covered by a bottom-to-top
+   fade back to the real panel background so text keeps the same
+   contrast it always had. The SVG itself is intentionally low-alpha
+   (baked into its own fills) on top of that. */
+
+.hero-banner {
+  position: relative;
+  isolation: isolate;
+}
+
+.hero-banner-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -2;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.hero-banner-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* Sidebar variant: fades down into the sidebar's own solid panel color so
+   the nav links below sit on a fully opaque, unchanged background. */
+.hero-banner.is-sidebar .hero-banner-scrim {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-panel) 35%, transparent) 0%, var(--bg-panel) 92%);
+}
+
+/* Login variant: fades into the plain page background behind the
+   centered card, and also darkens top-to-bottom slightly so the card's
+   own border keeps full contrast regardless of where it lands. */
+.hero-banner.is-login .hero-banner-scrim {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg) 20%, transparent) 0%, var(--bg) 88%);
+}
+
+/* --- Footer / about section (components/AppFooter.jsx) --- */
+
+.app-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 6px 2px;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.app-footer.is-compact {
+  padding: 10px 0 0;
+}
+
+.app-footer-mission {
+  max-width: 62ch;
+}
+
+/* Original mark, inspired by (not a reproduction of) the official UN
+   SDG-13 icon - see AppFooter.jsx's docstring for why. Sized small and
+   fixed so it reads as a credit, not a logo lockup. */
+.climate-badge {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent-2) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-2) 40%, var(--border));
 }

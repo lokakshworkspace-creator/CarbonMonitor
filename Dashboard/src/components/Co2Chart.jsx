@@ -20,6 +20,7 @@ import {
   YAxis,
 } from 'recharts'
 
+import EmptyState from './EmptyState.jsx'
 import { LEVEL_COLOR } from '../lib/levels.js'
 
 // Matches styles.css's --border/--text-dim/--bg-panel/--accent exactly -
@@ -39,10 +40,10 @@ function LevelDot({ cx, cy, payload }) {
 export default function Co2Chart({ points, thresholds }) {
   if (points.length === 0) {
     return (
-      <div className="empty">
+      <EmptyState>
         Waiting for readings… Publish with{' '}
         <code>python tests/mqtt_test_publisher.py --co2-sequence &quot;650,1250,2400,700&quot;</code>
-      </div>
+      </EmptyState>
     )
   }
 

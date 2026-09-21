@@ -13,6 +13,7 @@
 
 import { useEffect, useState } from 'react'
 
+import EmptyState from '../components/EmptyState.jsx'
 import RecordAnchorFilter from '../components/RecordAnchorFilter.jsx'
 import RecordPicker from '../components/RecordPicker.jsx'
 import VerificationResult from '../components/VerificationResult.jsx'
@@ -99,7 +100,7 @@ export default function Verification() {
         />
         <div className="card">
           {!recordsError && records.length > 0 && visibleRecords.length === 0 ? (
-            <div className="empty">No {filter === 'anchored' ? 'anchored' : 'pending'} records in view.</div>
+            <EmptyState>No {filter === 'anchored' ? 'anchored' : 'pending'} records in view.</EmptyState>
           ) : (
             <RecordPicker
               records={visibleRecords}

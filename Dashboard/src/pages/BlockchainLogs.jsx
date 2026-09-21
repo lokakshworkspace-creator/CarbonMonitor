@@ -10,6 +10,7 @@
 
 import { useEffect, useState } from 'react'
 
+import EmptyState from '../components/EmptyState.jsx'
 import RecordAnchorFilter from '../components/RecordAnchorFilter.jsx'
 import { useEventStream } from '../context/eventStreamContext.js'
 import { filterByAnchor } from '../lib/records.js'
@@ -77,13 +78,13 @@ export default function BlockchainLogs() {
         <div className="card">
           {error && <div className="empty error-text">{error}</div>}
           {!error && records.length === 0 && (
-            <div className="empty">
+            <EmptyState>
               No records yet. Publish a reading with{' '}
               <code>python tests/mqtt_test_publisher.py --scenario normal</code>
-            </div>
+            </EmptyState>
           )}
           {!error && records.length > 0 && visibleRecords.length === 0 && (
-            <div className="empty">No {filter === 'anchored' ? 'anchored' : 'pending'} records in view.</div>
+            <EmptyState>No {filter === 'anchored' ? 'anchored' : 'pending'} records in view.</EmptyState>
           )}
           {!error && visibleRecords.length > 0 && (
             <table className="table">

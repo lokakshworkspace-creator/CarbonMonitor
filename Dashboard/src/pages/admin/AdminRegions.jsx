@@ -7,6 +7,8 @@
 
 import { useEffect, useState } from 'react'
 
+import EmptyState from '../../components/EmptyState.jsx'
+import { LeafIcon } from '../../components/icons.jsx'
 import { adminCreateRegion, adminListRegions } from '../../services/api.js'
 
 export default function AdminRegions() {
@@ -54,13 +56,14 @@ export default function AdminRegions() {
           onChange={(event) => setDescription(event.target.value)}
         />
         <button type="submit" className="btn-verify" disabled={pending}>
+          <LeafIcon size={13} />
           {pending ? 'Creating…' : 'Create region'}
         </button>
       </form>
 
       <div className="card">
         {regions.length === 0 ? (
-          <div className="empty">No regions yet.</div>
+          <EmptyState>No regions yet.</EmptyState>
         ) : (
           <table className="table">
             <thead>

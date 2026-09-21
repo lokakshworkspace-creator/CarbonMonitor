@@ -12,6 +12,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
+import EmptyState from '../components/EmptyState.jsx'
+import { LeafIcon } from '../components/icons.jsx'
 import { useEventStream } from '../context/eventStreamContext.js'
 import { useDevices } from '../hooks/useDevices.js'
 import { useReadings } from '../hooks/useReadings.js'
@@ -111,7 +113,9 @@ export default function Overview() {
       <section className="section">
         <div className="stat-row">
           <div className="card stat-card">
-            <div className="stat-label">Current CO₂</div>
+            <div className="stat-label stat-label-icon">
+              <LeafIcon size={11} aria-hidden="true" /> Current CO₂
+            </div>
             <div className="stat-value" style={{ color: LEVEL_COLOR[level] ?? 'var(--text)' }}>
               {current ? current.co2 : '—'}
               <span className="stat-unit">ppm</span>
@@ -155,7 +159,7 @@ export default function Overview() {
         </div>
         <div className="card">
           {alerts.length === 0 ? (
-            <div className="empty">No threshold or tampering events yet.</div>
+            <EmptyState>No threshold or tampering events yet.</EmptyState>
           ) : (
             <div className="feed">
               {alerts.map((alert) => (

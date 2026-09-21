@@ -21,6 +21,7 @@ import { useMemo, useState } from 'react'
 
 import Co2Chart from '../components/Co2Chart.jsx'
 import Co2Gauge from '../components/Co2Gauge.jsx'
+import { ChartIcon } from '../components/icons.jsx'
 import WeeklyAnalytics from '../components/WeeklyAnalytics.jsx'
 import { useEventStream } from '../context/eventStreamContext.js'
 import { useAnalytics } from '../hooks/useAnalytics.js'
@@ -129,7 +130,12 @@ export default function RealTimeData() {
 
       <section className="section">
         <div className="section-head">
-          <h2>{chartTab === 'live' ? 'Recent readings (ppm)' : `Last ${ANALYTICS_DAYS} days (ppm)`}</h2>
+          <h2 className="with-icon">
+            <span className="card-icon-badge is-chart" aria-hidden="true">
+              <ChartIcon />
+            </span>
+            {chartTab === 'live' ? 'Recent readings (ppm)' : `Last ${ANALYTICS_DAYS} days (ppm)`}
+          </h2>
           <div className="filters">
             {CHART_TABS.map(({ key, label }) => (
               <button
