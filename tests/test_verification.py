@@ -11,6 +11,7 @@ last session.
 import asyncio
 
 import verification
+from auth import CurrentUser
 from events import EventType
 from hashing import generate_hash
 
@@ -18,6 +19,13 @@ DEVICE_ID = "esp32-01"
 CO2 = 500.0
 SENSOR_TIMESTAMP = "2026-08-23T00:00:00+00:00"
 CORRECT_HASH = generate_hash(DEVICE_ID, CO2, SENSOR_TIMESTAMP)
+
+# verify_record() now takes current_user (the region-scoping fix) - these
+# tests are about the hash-comparison logic, not scoping itself (see
+# test_region_isolation.py for that), so an admin (region_scope_filter's
+# {} - no restriction) exercises the exact same code path these tests
+# already covered before that parameter existed.
+_ADMIN_USER = CurrentUser(user_id="admin-1", username="admin", role="admin", region_id=None)
 
 
 class _BroadcastRecorder:
@@ -75,7 +83,7 @@ def test_verify_record_reports_verified_when_hashes_match(monkeypatch):
     update_calls: list[tuple] = []
     recorder, _ = _install_fakes(monkeypatch, _make_record(), onchain_hash=CORRECT_HASH, update_calls=update_calls)
 
-    result = asyncio.run(verification.verify_record("rec-1"))
+    result = asyncio.run(verification.verify_record("rec-1", _ADMIN_USER))
 
     assert result["status"] == "Verified"
     assert result["stored_hash"] == CORRECT_HASH
@@ -96,7 +104,7 @@ def test_verify_record_reports_tampered_when_co2_was_edited_directly(monkeypatch
         monkeypatch, tampered_record, onchain_hash=CORRECT_HASH, update_calls=update_calls
     )
 
-    result = asyncio.run(verification.verify_record("rec-1"))
+    result = asyncio.run(verification.verify_record("rec-1", _ADMIN_USER))
 
     assert result["status"] == "Tampered"
     assert result["stored_hash"] == CORRECT_HASH  # the stale hash field, untouched by the tamper
@@ -120,7 +128,7 @@ def test_verify_record_normalizes_0x_prefix_before_comparing(monkeypatch):
     onchain_hash_with_prefix = "0x" + CORRECT_HASH.upper()
     recorder, fake_client = _install_fakes(monkeypatch, _make_record(), onchain_hash=onchain_hash_with_prefix)
 
-    result = asyncio.run(verification.verify_record("rec-1"))
+    result = asyncio.run(verification.verify_record("rec-1", _ADMIN_USER))
 
     assert result["status"] == "Verified"
     event_types = [e["event_type"] for e in recorder.broadcast_events]
@@ -132,7 +140,7 @@ def test_verify_record_not_yet_anchored_skips_the_compare(monkeypatch):
     record = _make_record(blockchain_record_id=None)
     recorder, fake_client = _install_fakes(monkeypatch, record, onchain_hash=CORRECT_HASH)
 
-    result = asyncio.run(verification.verify_record("rec-1"))
+    result = asyncio.run(verification.verify_record("rec-1", _ADMIN_USER))
 
     assert result["status"] == "NotAnchored"
     assert result["onchain_hash"] is None
@@ -152,8 +160,12 @@ def test_verify_record_reports_not_found_for_a_missing_record(monkeypatch):
 
     monkeypatch.setattr(verification, "get_sensor_record", _fake_get_record)
 
-    result = asyncio.run(verification.verify_record("missing-id"))
+    result = asyncio.run(verification.verify_record("missing-id", _ADMIN_USER))
 
     assert result["status"] == "NotFound"
+    # No VERIFICATION_STARTED here (unlike the other tests above): that
+    # event was moved to fire only once a record - and therefore a
+    # device_id - is actually known (see verify_record()'s docstring for
+    # why), and a missing record never gets that far.
     event_types = [e["event_type"] for e in recorder.broadcast_events]
-    assert event_types == [EventType.VERIFICATION_STARTED.value, EventType.VERIFICATION_FAILED.value]
+    assert event_types == [EventType.VERIFICATION_FAILED.value]

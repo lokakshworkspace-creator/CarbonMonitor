@@ -15,13 +15,21 @@
  * mid-demo is a normal event, not an error), and the connection status is
  * itself observable so the UI can honestly show "disconnected" rather than
  * silently displaying a frozen feed.
+ *
+ * /ws now requires a token (?token=<jwt>, same as notificationSocket.js's
+ * /ws/notifications) - a security fix closing a confirmed unauthenticated
+ * cross-region data leak on the gateway side. Without this change here,
+ * that fix would reject every connection outright (no token was ever
+ * sent before), breaking the five original pages entirely rather than
+ * correctly scoping them - so this one attachment is the minimum needed
+ * for the backend fix to do its job instead of just causing an outage.
  */
 
-import { GATEWAY_URL } from './api.js'
+import { getStoredToken, GATEWAY_URL } from './api.js'
 
 // The gateway serves HTTP and WebSocket on the same origin, so the ws://
 // URL is derived from the same base rather than configured separately.
-const WS_URL = `${GATEWAY_URL.replace(/^http/, 'ws')}/ws`
+const WS_URL_BASE = `${GATEWAY_URL.replace(/^http/, 'ws')}/ws`
 
 const INITIAL_RECONNECT_DELAY_MS = 1000
 const MAX_RECONNECT_DELAY_MS = 10000
@@ -52,8 +60,20 @@ function connect() {
     return
   }
 
+  const token = getStoredToken()
+  if (!token) {
+    // Nothing to authenticate with yet (e.g. the login screen, before
+    // AuthContext has a token at all) - don't even attempt the handshake,
+    // it would just be rejected. scheduleReconnect() keeps checking
+    // periodically, same as notificationSocket.js, so logging in picks
+    // this up automatically on the next retry with no page reload needed.
+    setStatus('disconnected')
+    scheduleReconnect()
+    return
+  }
+
   setStatus('connecting')
-  socket = new WebSocket(WS_URL)
+  socket = new WebSocket(`${WS_URL_BASE}?token=${encodeURIComponent(token)}`)
 
   socket.onopen = () => {
     reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS // reset backoff after a good connection
@@ -134,5 +154,3 @@ export function subscribeStatus(listener) {
 export function getStatus() {
   return status
 }
-
-export { WS_URL }

@@ -22,8 +22,9 @@ from __future__ import annotations
 
 import logging
 
+from auth import CurrentUser
 from blockchain import client as blockchain_client
-from database import get_sensor_record, update_verification_status
+from database import get_region_id_for_device, get_sensor_record, update_verification_status
 from events import EventType, Severity, build_event
 from hashing import generate_hash
 from websocket_manager import manager
@@ -38,15 +39,25 @@ def _normalize_hash(value: str) -> str:
     return value.lower()
 
 
-async def verify_record(record_id: str) -> dict:
-    await manager.broadcast(
-        build_event(
-            EventType.VERIFICATION_STARTED,
-            message=f"Verification started for record {record_id}",
-            severity=Severity.INFO,
-        ).to_dict()
-    )
+async def verify_record(record_id: str, current_user: CurrentUser) -> dict:
+    """current_user gates this to the caller's own region: an admin can
+    verify any record; a regional_head can only verify a record whose
+    device belongs to their own region. Out-of-scope is reported exactly
+    as "NotFound" - the same indistinguishable-from-nonexistent principle
+    every other region-scoped route in this codebase uses (see
+    routers/readings.py's _ensure_device_in_scope) - and broadcasts
+    nothing over /ws, so an out-of-scope attempt leaves no trace on
+    anyone else's live feed either.
 
+    VERIFICATION_STARTED now fires after the record is fetched (and the
+    scope check passes) rather than before, specifically so it can carry
+    device_id - websocket_manager.broadcast() resolves an event's region
+    from device_id and routes it accordingly, and an event with no
+    device_id goes to every connected client. The two failure paths
+    above this point (the fetch itself raising, or no such record)
+    genuinely cannot know a device_id yet, so those still broadcast
+    without one - which is fine, since neither message carries anything
+    region-identifying (just the opaque record_id) for that to leak."""
     try:
         record = await get_sensor_record(record_id)
     except Exception as exc:
@@ -73,6 +84,20 @@ async def verify_record(record_id: str) -> dict:
     device_id = record.get("device_id")
     stored_hash = record.get("hash")
     blockchain_record_id = record.get("blockchain_record_id")
+
+    if current_user.role != "admin":
+        device_region_id = await get_region_id_for_device(device_id)
+        if device_region_id is None or device_region_id != current_user.region_id:
+            return {"status": "NotFound", "stored_hash": None, "onchain_hash": None, "recomputed_hash": None}
+
+    await manager.broadcast(
+        build_event(
+            EventType.VERIFICATION_STARTED,
+            message=f"Verification started for record {record_id}",
+            severity=Severity.INFO,
+            device_id=device_id,
+        ).to_dict()
+    )
 
     if blockchain_record_id is None:
         await manager.broadcast(

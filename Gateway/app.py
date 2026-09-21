@@ -12,7 +12,16 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 
-from auth import CurrentUser, authenticate_user, create_access_token, get_current_user, hash_password, verify_password
+from auth import (
+    CurrentUser,
+    authenticate_user,
+    create_access_token,
+    decode_access_token,
+    get_current_user,
+    hash_password,
+    region_scope_filter,
+    verify_password,
+)
 from blockchain import client as blockchain_client
 from config import settings
 from database import (
@@ -22,6 +31,7 @@ from database import (
     get_recent_records,
     get_user_by_username,
     insert_sensor_record,
+    list_device_ids_in_scope,
     mark_notification_delivered,
     touch_last_login,
     update_blockchain_info,
@@ -399,35 +409,81 @@ def health() -> dict:
 
 
 @app.get("/devices/status", response_model=list[DeviceStatusItem])
-def devices_status() -> list[dict]:
-    return device_status_tracker.snapshot()
+async def devices_status(current_user: CurrentUser = Depends(get_current_user)) -> list[dict]:
+    """Region-scoped (this and the next three routes were a confirmed
+    unauthenticated cross-region data leak - the five original pre-RBAC
+    pages predate regions/roles entirely and were never retrofitted with
+    real server-side scoping when RBAC was added, only a client-side
+    route guard around them). device_status_tracker's snapshot carries no
+    region information of its own - it's a plain in-memory
+    device_id -> online/last_seen map - so list_device_ids_in_scope()
+    resolves the caller's scope to the concrete device_id set (the same
+    devices -> factories two-hop lookup used throughout this codebase)
+    and the snapshot is filtered to it. None means admin: no filtering."""
+    device_ids = await list_device_ids_in_scope(region_scope_filter(current_user))
+    snapshot = device_status_tracker.snapshot()
+    if device_ids is None:
+        return snapshot
+    in_scope = set(device_ids)
+    return [device for device in snapshot if device["device_id"] in in_scope]
 
 
 @app.get("/records", response_model=list[RecordItem])
-async def records(limit: int = Query(DEFAULT_RECORDS_LIMIT, ge=1, le=MAX_RECORDS_LIMIT)) -> list[dict]:
+async def records(
+    limit: int = Query(DEFAULT_RECORDS_LIMIT, ge=1, le=MAX_RECORDS_LIMIT),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> list[dict]:
     """Recent readings, newest first. Backs both the Verification page
     (pick a record to verify) and Blockchain Logs (anchoring status per
-    record) - the two need the same rows, so they share one endpoint."""
-    return await get_recent_records(limit)
+    record) - the two need the same rows, so they share one endpoint.
+
+    Region-scoped like devices_status() above - sensor_data documents
+    carry no region_id of their own (see list_device_ids_in_scope()'s
+    docstring), so device_id membership is what get_recent_records()
+    filters on instead."""
+    device_ids = await list_device_ids_in_scope(region_scope_filter(current_user))
+    return await get_recent_records(limit, device_ids)
 
 
 @app.get("/records/stats", response_model=RecordsStatsResponse)
-async def records_stats() -> dict:
+async def records_stats(current_user: CurrentUser = Depends(get_current_user)) -> dict:
     """Total readings stored and how many are anchored on-chain, for the
     Overview page's counts. Declared before nothing else claims /records/*,
     and kept separate from GET /records so a glance view never pays for
-    transferring rows it won't display."""
-    return await count_records()
+    transferring rows it won't display. Region-scoped, same as GET /records."""
+    device_ids = await list_device_ids_in_scope(region_scope_filter(current_user))
+    return await count_records(device_ids)
 
 
 @app.post("/verify/{record_id}", response_model=VerifyResponse)
-async def verify(record_id: str) -> dict:
-    return await verify_record(record_id)
+async def verify(record_id: str, current_user: CurrentUser = Depends(get_current_user)) -> dict:
+    return await verify_record(record_id, current_user)
 
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
-    await manager.connect(websocket)
+    """Auth via query param (?token=<jwt>), same pattern as
+    /ws/notifications (routers/notifications.py) and for the same reason:
+    a browser WebSocket handshake has no way to set an Authorization
+    header. Rejects with close() BEFORE accept() on a missing/invalid
+    token or an unresolvable room, so an unauthenticated client never
+    completes the upgrade at all - this was the confirmed leak (this
+    route previously had no auth check whatsoever)."""
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=4401)
+        return
+    try:
+        current_user = decode_access_token(token)
+    except HTTPException:
+        await websocket.close(code=4401)
+        return
+    room = notification_rooms.room_for(current_user.role, current_user.region_id)
+    if room is None:
+        await websocket.close(code=4403)
+        return
+
+    await manager.connect(websocket, room)
     test_event = build_event(
         EventType.TEST_MESSAGE,
         message="WebSocket connected to gateway",

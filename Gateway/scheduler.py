@@ -28,6 +28,7 @@ import logging
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from auth import CurrentUser
 from config import settings
 from database import get_recently_anchored_records, mark_auto_verified
 from verification import verify_record
@@ -38,6 +39,15 @@ logger = logging.getLogger(__name__)
 # Small and fixed rather than configurable - see the module docstring on
 # why "not the whole collection" is the entire point.
 RECHECK_SAMPLE_SIZE = 5
+
+# This background job isn't acting on behalf of any particular logged-in
+# user - it's a system-level process that must be able to re-check any
+# anchored record regardless of region, same as verify_record()'s
+# region-scoping fix intends for a real admin. This is not a real
+# account, never authenticates anything, and exists only to give
+# verify_record() the correct "no restriction" identity (role="admin" ->
+# auth.region_scope_filter() returns {}) now that it takes one.
+_SYSTEM_USER = CurrentUser(user_id="scheduler", username="scheduler", role="admin", region_id=None)
 
 _JOB_ID = "periodic_tamper_check"
 
@@ -59,7 +69,7 @@ async def run_verification_cycle() -> None:
     for record in records:
         record_id = record["id"]
         try:
-            await verify_record(record_id)
+            await verify_record(record_id, _SYSTEM_USER)
             await mark_auto_verified(record_id)
         except Exception:
             # verify_record() already catches and reports its own

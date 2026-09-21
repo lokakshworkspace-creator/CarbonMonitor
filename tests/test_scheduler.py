@@ -103,7 +103,7 @@ def test_cycle_calls_verify_record_once_per_sampled_id_and_marks_each_checked(mo
 
     verify_calls: list[str] = []
 
-    async def _fake_verify_record(record_id):
+    async def _fake_verify_record(record_id, current_user):
         verify_calls.append(record_id)
         return {"status": "Verified"}  # the return value is deliberately ignored by the scheduler
 
@@ -196,7 +196,7 @@ def test_cycle_survives_a_failure_on_one_record_and_still_checks_the_rest(monkey
 
     verify_calls: list[str] = []
 
-    async def _fake_verify_record(record_id):
+    async def _fake_verify_record(record_id, current_user):
         verify_calls.append(record_id)
         return {"status": "Verified"}
 

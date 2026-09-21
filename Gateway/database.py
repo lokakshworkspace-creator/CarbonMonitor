@@ -110,7 +110,7 @@ _RECENT_RECORDS_PROJECTION = {
 }
 
 
-async def get_recent_records(limit: int) -> list[dict[str, Any]]:
+async def get_recent_records(limit: int, device_ids: list[str] | None = None) -> list[dict[str, Any]]:
     """Most recent sensor readings, newest first, for the dashboard's
     Verification and Blockchain Logs pages.
 
@@ -118,8 +118,13 @@ async def get_recent_records(limit: int) -> list[dict[str, Any]]:
     insertion order and indexed by default, whereas sensor_timestamp comes
     from the device's own clock - which is neither guaranteed monotonic
     across devices nor indexed here.
+
+    device_ids is None for an admin (no restriction) or the caller's
+    in-scope device_id set for a regional_head - see
+    list_device_ids_in_scope().
     """
-    cursor = _collection.find({}, _RECENT_RECORDS_PROJECTION).sort("_id", -1).limit(limit)
+    query: dict[str, Any] = {} if device_ids is None else {"device_id": {"$in": device_ids}}
+    cursor = _collection.find(query, _RECENT_RECORDS_PROJECTION).sort("_id", -1).limit(limit)
     records = []
     async for document in cursor:
         # Exposed as "id" (a str) rather than a raw ObjectId, matching what
@@ -129,16 +134,23 @@ async def get_recent_records(limit: int) -> list[dict[str, Any]]:
     return records
 
 
-async def count_records() -> dict[str, int]:
+async def count_records(device_ids: list[str] | None = None) -> dict[str, int]:
     """Collection-level counts for the dashboard's Overview tiles.
 
     count_documents() rather than fetching rows and counting them in the
     browser: Overview only needs two integers, and pulling the collection
     across the wire to derive them would get slower with every reading the
     demo produces.
+
+    device_ids is None for an admin (no restriction) or the caller's
+    in-scope device_id set for a regional_head - see
+    list_device_ids_in_scope()'s docstring for why sensor_data documents
+    have to be scoped by device_id membership rather than
+    auth.region_scope_filter()'s own {"region_id": ...} shape directly.
     """
-    total = await _collection.count_documents({})
-    anchored = await _collection.count_documents({"blockchain_record_id": {"$ne": None}})
+    query: dict[str, Any] = {} if device_ids is None else {"device_id": {"$in": device_ids}}
+    total = await _collection.count_documents(query)
+    anchored = await _collection.count_documents({**query, "blockchain_record_id": {"$ne": None}})
     return {"total": total, "anchored": anchored}
 
 
@@ -526,6 +538,40 @@ async def get_region_id_for_device(device_id: str) -> str | None:
     for callers (routers/readings.py) that don't need factory_id too."""
     resolved = await get_factory_and_region_for_device(device_id)
     return resolved[1] if resolved else None
+
+
+async def list_device_ids_in_scope(scope_filter: dict[str, Any]) -> list[str] | None:
+    """Resolves scope_filter (auth.region_scope_filter()'s output) to the
+    concrete set of device_id strings (the MQTT identity, not a Mongo
+    _id) it covers.
+
+    This exists because sensor_data documents and device_status_tracker's
+    in-memory snapshot carry no region_id of their own -
+    sensor_data.factory_id is deliberately never populated at ingestion
+    (see insert_sensor_record()) - so region_scope_filter()'s own
+    {"region_id": ObjectId(...)} shape cannot be applied to either of
+    them directly the way it can to factories/notifications. Scoping them
+    means resolving through devices -> factories first, the same two-hop
+    lookup get_factory_and_region_for_device() already does per-device;
+    this is the bulk version, used where a whole list/count needs
+    filtering rather than checking one already-known device_id.
+
+    Returns None for an admin (scope_filter == {}), not []: None means
+    "no restriction, see everything", which is a different thing from a
+    regional_head whose region genuinely has zero devices ([]) -
+    collapsing those into one falsy value would make callers that only
+    check truthiness treat an admin as if they had no devices either.
+    Every caller must check `is None` explicitly.
+    """
+    if not scope_filter:
+        return None
+    factory_ids = [doc["_id"] async for doc in _factories_collection.find(scope_filter, {"_id": 1})]
+    if not factory_ids:
+        return []
+    return [
+        doc["device_id"]
+        async for doc in _devices_collection.find({"factory_id": {"$in": factory_ids}}, {"device_id": 1})
+    ]
 
 
 # --- Phase 3: chart-hydration reads (routers/readings.py) ---
