@@ -134,6 +134,37 @@ async def get_recent_records(limit: int, device_ids: list[str] | None = None) ->
     return records
 
 
+async def get_anchored_records(device_ids: list[str] | None = None) -> list[dict[str, Any]]:
+    """Every anchored record, newest first - unlike get_recent_records(),
+    not windowed to the N most recent readings of any anchor state.
+
+    The Blockchain Logs / Verification "Anchored only" filter used to be
+    implemented as a client-side pass over an already-capped
+    get_recent_records() batch, which meant an anchored record older than
+    that batch's window was invisible no matter how large the limit was
+    set - it was never fetched from Mongo in the first place. This
+    queries blockchain_record_id directly instead, so it is correct
+    regardless of how much older history exists. Deliberately unbounded
+    rather than capped like get_recent_records(): the anchored set is a
+    small, bounded subset of the collection (on-chain confirmation is
+    comparatively rare and slow), not the full backlog, so there is no
+    stray-?limit-style memory risk here to guard against.
+
+    device_ids is None for an admin (no restriction) or the caller's
+    in-scope device_id set for a regional_head - see
+    list_device_ids_in_scope().
+    """
+    query: dict[str, Any] = {"blockchain_record_id": {"$ne": None}}
+    if device_ids is not None:
+        query["device_id"] = {"$in": device_ids}
+    cursor = _collection.find(query, _RECENT_RECORDS_PROJECTION).sort("_id", -1)
+    records = []
+    async for document in cursor:
+        document["id"] = str(document.pop("_id"))
+        records.append(document)
+    return records
+
+
 async def count_records(device_ids: list[str] | None = None) -> dict[str, int]:
     """Collection-level counts for the dashboard's Overview tiles.
 

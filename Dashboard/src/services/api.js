@@ -128,6 +128,16 @@ export function getRecords(limit = 20) {
   return _request(`/records?limit=${encodeURIComponent(limit)}`)
 }
 
+/**
+ * GET /records?anchored=true -> every anchored record in scope, newest
+ * first, unbounded by any limit - see the backend's get_anchored_records()
+ * for why this is a separate real query rather than a client-side filter
+ * over getRecords()'s capped, recent-only batch.
+ */
+export function getAnchoredRecords() {
+  return _request('/records?anchored=true')
+}
+
 /** GET /records/stats -> { total, anchored } */
 export function getRecordStats() {
   return _request('/records/stats')

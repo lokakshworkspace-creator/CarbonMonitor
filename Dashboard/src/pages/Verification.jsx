@@ -19,17 +19,20 @@ import RecordPicker from '../components/RecordPicker.jsx'
 import VerificationResult from '../components/VerificationResult.jsx'
 import { useEventStream } from '../context/eventStreamContext.js'
 import { filterByAnchor } from '../lib/records.js'
-import { getRecords, verifyRecord } from '../services/api.js'
+import { getAnchoredRecords, getRecords, verifyRecord } from '../services/api.js'
 
 // Matches Blockchain Logs: pull enough history that anchored records from
 // earlier sessions stay selectable even when recent rows are all Pending
-// test runs. 200 is the GET /records endpoint's own MAX_RECORDS_LIMIT.
-const RECORDS_LIMIT = 200
+// test runs. 500 is the GET /records endpoint's own MAX_RECORDS_LIMIT.
+// Still a window, though - the Anchored filter bypasses it entirely via
+// getAnchoredRecords() below, which is unbounded.
+const RECORDS_LIMIT = 500
 
 export default function Verification() {
   const { events } = useEventStream()
 
   const [records, setRecords] = useState([])
+  const [anchoredRecords, setAnchoredRecords] = useState([])
   const [recordsError, setRecordsError] = useState(null)
   const [selectedId, setSelectedId] = useState(null)
   const [filter, setFilter] = useState('all')
@@ -56,6 +59,17 @@ export default function Verification() {
       .catch((err) => {
         if (!cancelled) setRecordsError(err.message)
       })
+    // Separate, unbounded fetch so the Anchored filter can select from
+    // every anchored record in scope, not just whichever happen to fall
+    // inside the general fetch's most-recent-RECORDS_LIMIT window above.
+    getAnchoredRecords()
+      .then((data) => {
+        if (cancelled) return
+        setAnchoredRecords(data)
+      })
+      .catch((err) => {
+        if (!cancelled) setRecordsError(err.message)
+      })
     return () => {
       cancelled = true
     }
@@ -78,9 +92,11 @@ export default function Verification() {
   }
 
   // Filter is display-only over data already fetched; the selected-record
-  // lookup stays against the full list so a selection survives toggling.
-  const visibleRecords = filterByAnchor(records, filter)
-  const selectedRecord = records.find((r) => r.id === selectedId) ?? null
+  // lookup checks both fetches so a selection survives toggling even when
+  // it came from the Anchored filter's separate, unbounded record set.
+  const visibleRecords = filter === 'anchored' ? anchoredRecords : filterByAnchor(records, filter)
+  const selectedRecord =
+    records.find((r) => r.id === selectedId) ?? anchoredRecords.find((r) => r.id === selectedId) ?? null
 
   return (
     <div className="page">
@@ -96,10 +112,10 @@ export default function Verification() {
           value={filter}
           onChange={setFilter}
           visibleCount={visibleRecords.length}
-          totalCount={records.length}
+          totalCount={filter === 'anchored' ? anchoredRecords.length : records.length}
         />
         <div className="card">
-          {!recordsError && records.length > 0 && visibleRecords.length === 0 ? (
+          {!recordsError && (records.length > 0 || anchoredRecords.length > 0) && visibleRecords.length === 0 ? (
             <EmptyState>No {filter === 'anchored' ? 'anchored' : 'pending'} records in view.</EmptyState>
           ) : (
             <RecordPicker

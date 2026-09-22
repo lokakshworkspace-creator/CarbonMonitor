@@ -14,12 +14,16 @@ import EmptyState from '../components/EmptyState.jsx'
 import RecordAnchorFilter from '../components/RecordAnchorFilter.jsx'
 import { useEventStream } from '../context/eventStreamContext.js'
 import { filterByAnchor } from '../lib/records.js'
-import { getRecords } from '../services/api.js'
+import { getAnchoredRecords, getRecords } from '../services/api.js'
 
 // Pulled up from the GET /records default so anchored records from earlier
 // sessions stay in view even when recent activity is mostly Pending test
-// runs. 200 is the endpoint's own MAX_RECORDS_LIMIT.
-const RECORDS_LIMIT = 200
+// runs. 500 is the endpoint's own MAX_RECORDS_LIMIT. This still windows
+// "All"/"Pending" to the most recent 500 readings of any anchor state -
+// "Anchored" bypasses this entirely via getAnchoredRecords() below, which
+// is unbounded, so an anchored record older than this window is still
+// found there even though it would drop out of this general fetch.
+const RECORDS_LIMIT = 500
 
 function truncateHash(hash) {
   if (!hash) return null
@@ -29,6 +33,7 @@ function truncateHash(hash) {
 export default function BlockchainLogs() {
   const { events } = useEventStream()
   const [records, setRecords] = useState([])
+  const [anchoredRecords, setAnchoredRecords] = useState([])
   const [error, setError] = useState(null)
   const [filter, setFilter] = useState('all')
 
@@ -50,22 +55,32 @@ export default function BlockchainLogs() {
       .catch((err) => {
         if (!cancelled) setError(err.message)
       })
+    // Separate, unbounded fetch so the Anchored filter shows every
+    // anchored record in scope, not just whichever happen to fall inside
+    // the general fetch's most-recent-RECORDS_LIMIT window above.
+    getAnchoredRecords()
+      .then((data) => {
+        if (cancelled) return
+        setAnchoredRecords(data)
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err.message)
+      })
     return () => {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [relevantEventCount])
 
-  const anchoredCount = records.filter((r) => r.blockchain_record_id !== null).length
+  const anchoredCount = anchoredRecords.length
 
-  const visibleRecords = filterByAnchor(records, filter)
+  const visibleRecords = filter === 'anchored' ? anchoredRecords : filterByAnchor(records, filter)
 
   return (
     <div className="page">
       <h1>Blockchain Logs</h1>
       <p className="page-subtitle">
-        Every recent reading&apos;s anchoring status - {anchoredCount} of {records.length} confirmed on
-        Sepolia.
+        Every recent reading&apos;s anchoring status - {anchoredCount} confirmed on Sepolia in total.
       </p>
 
       <section className="section">
@@ -73,17 +88,17 @@ export default function BlockchainLogs() {
           value={filter}
           onChange={setFilter}
           visibleCount={visibleRecords.length}
-          totalCount={records.length}
+          totalCount={filter === 'anchored' ? anchoredRecords.length : records.length}
         />
         <div className="card">
           {error && <div className="empty error-text">{error}</div>}
-          {!error && records.length === 0 && (
+          {!error && records.length === 0 && anchoredRecords.length === 0 && (
             <EmptyState>
               No records yet. Publish a reading with{' '}
               <code>python tests/mqtt_test_publisher.py --scenario normal</code>
             </EmptyState>
           )}
-          {!error && records.length > 0 && visibleRecords.length === 0 && (
+          {!error && (records.length > 0 || anchoredRecords.length > 0) && visibleRecords.length === 0 && (
             <EmptyState>No {filter === 'anchored' ? 'anchored' : 'pending'} records in view.</EmptyState>
           )}
           {!error && visibleRecords.length > 0 && (

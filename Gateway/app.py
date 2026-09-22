@@ -27,6 +27,7 @@ from config import settings
 from database import (
     count_records,
     create_notification,
+    get_anchored_records,
     get_factory_and_region_for_device,
     get_recent_records,
     get_user_by_username,
@@ -84,7 +85,7 @@ DEVICE_TIMEOUT_CHECK_INTERVAL_SECONDS = 2.0
 # GET /records paging. The cap exists so a stray ?limit=100000 can't pull
 # the whole collection into memory and stall the event loop.
 DEFAULT_RECORDS_LIMIT = 20
-MAX_RECORDS_LIMIT = 200
+MAX_RECORDS_LIMIT = 500
 
 # Pipeline A's entry point: MQTTBridge.on_message pushes here from paho's
 # background thread; _consume_mqtt_messages below drains it on the main
@@ -431,6 +432,14 @@ async def devices_status(current_user: CurrentUser = Depends(get_current_user)) 
 @app.get("/records", response_model=list[RecordItem])
 async def records(
     limit: int = Query(DEFAULT_RECORDS_LIMIT, ge=1, le=MAX_RECORDS_LIMIT),
+    anchored: bool | None = Query(
+        None,
+        description=(
+            "True: every anchored record in scope, unbounded by limit "
+            "(see get_anchored_records()). Omitted/None: the usual "
+            "limit-windowed recent-readings fetch, any anchor state."
+        ),
+    ),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> list[dict]:
     """Recent readings, newest first. Backs both the Verification page
@@ -439,9 +448,18 @@ async def records(
 
     Region-scoped like devices_status() above - sensor_data documents
     carry no region_id of their own (see list_device_ids_in_scope()'s
-    docstring), so device_id membership is what get_recent_records()
-    filters on instead."""
+    docstring), so device_id membership is what get_recent_records()/
+    get_anchored_records() filter on instead.
+
+    anchored=true bypasses limit entirely rather than being a client-side
+    narrowing of this same windowed fetch: an anchored record older than
+    the most recent limit-many readings would otherwise never even be
+    fetched from Mongo, so no limit could make it visible. See
+    get_anchored_records()'s docstring for why leaving that query
+    unbounded is deliberate, not an oversight."""
     device_ids = await list_device_ids_in_scope(region_scope_filter(current_user))
+    if anchored is True:
+        return await get_anchored_records(device_ids)
     return await get_recent_records(limit, device_ids)
 
 
