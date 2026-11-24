@@ -10,6 +10,7 @@
  */
 
 import EmptyState from './EmptyState.jsx'
+import { demoAnchorState } from '../lib/records.js'
 
 const STATUS_BADGE_CLASS = {
   Verified: 'badge-online',
@@ -30,6 +31,10 @@ export default function RecordPicker({ records, selectedId, onSelect, error }) {
     )
   }
 
+  // Rows flagged isDemo (see lib/records.js's mergeWithDemo()) are the board's
+  // demo estimates: hashed and anchored like the rest, but kept apart from the
+  // verifiable /records set, so they are listed here and not selectable.
+
   return (
     <table className="table">
       <thead>
@@ -42,29 +47,47 @@ export default function RecordPicker({ records, selectedId, onSelect, error }) {
         </tr>
       </thead>
       <tbody>
-        {records.map((record) => (
-          <tr
-            key={record.id}
-            className={record.id === selectedId ? 'row-selected' : 'row-selectable'}
-            onClick={() => onSelect(record.id)}
-          >
-            <td className="mono">{record.device_id}</td>
-            <td>{record.co2} ppm</td>
-            <td className="mono dim">{record.sensor_timestamp}</td>
-            <td>
-              <span className={`badge ${STATUS_BADGE_CLASS[record.verification_status] ?? ''}`}>
-                {record.verification_status}
-              </span>
-            </td>
-            <td>
-              {record.blockchain_record_id !== null ? (
-                <span className="badge badge-online">#{record.blockchain_record_id}</span>
-              ) : (
-                <span className="dim">pending</span>
-              )}
-            </td>
-          </tr>
-        ))}
+        {records.map((record) =>
+          record.isDemo ? (
+            <tr key={record.id}>
+              <td className="mono">{record.device_id}</td>
+              <td>{record.demo_ppm} demo ppm</td>
+              <td className="mono dim">{record.sensor_timestamp}</td>
+              <td>
+                <span className="badge">Pending</span>
+              </td>
+              <td>
+                {demoAnchorState(record) === 'anchored' ? (
+                  <span className="badge badge-online">#{record.blockchain_record_id}</span>
+                ) : (
+                  <span className="dim">{demoAnchorState(record) === 'pending' ? 'pending' : 'not anchored'}</span>
+                )}
+              </td>
+            </tr>
+          ) : (
+            <tr
+              key={record.id}
+              className={record.id === selectedId ? 'row-selected' : 'row-selectable'}
+              onClick={() => onSelect(record.id)}
+            >
+              <td className="mono">{record.device_id}</td>
+              <td>{record.co2} ppm</td>
+              <td className="mono dim">{record.sensor_timestamp}</td>
+              <td>
+                <span className={`badge ${STATUS_BADGE_CLASS[record.verification_status] ?? ''}`}>
+                  {record.verification_status}
+                </span>
+              </td>
+              <td>
+                {record.blockchain_record_id !== null ? (
+                  <span className="badge badge-online">#{record.blockchain_record_id}</span>
+                ) : (
+                  <span className="dim">pending</span>
+                )}
+              </td>
+            </tr>
+          ),
+        )}
       </tbody>
     </table>
   )

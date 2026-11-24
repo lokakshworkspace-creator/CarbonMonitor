@@ -40,7 +40,7 @@ export default function Login() {
     <div className="login-page hero-banner is-login">
       <HeroScene className="hero-banner-svg" />
       <div className="hero-banner-scrim" />
-      <div>
+      <div className="login-column">
         <form className="card login-form" onSubmit={handleSubmit}>
           <div className="login-brand">
             <div className="brand-mark">CO₂</div>
