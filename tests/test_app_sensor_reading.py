@@ -44,6 +44,8 @@ def _reading(co2: float) -> dict:
     return {
         "device_id": "esp32-01",
         "co2": co2,
+        # esp32-01 is calibration-gated in app.py: a calibrated device says so.
+        "calibration_status": "CALIBRATED",
         "sensor_timestamp": "2026-08-23T00:00:00+00:00",
         "gateway_received_timestamp": "2026-08-23T00:00:00.100000+00:00",
     }

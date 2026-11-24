@@ -109,6 +109,8 @@ def main() -> None:
     args = parser.parse_args()
 
     client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
+    if settings.mqtt_username and settings.mqtt_password:
+        client.username_pw_set(settings.mqtt_username, settings.mqtt_password)
     client.connect(args.broker_host, args.broker_port)
     client.loop_start()
 
