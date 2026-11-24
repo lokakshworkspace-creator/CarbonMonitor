@@ -14,9 +14,11 @@ env/
 .env
 .env.*
 !.env.example
+mosquitto_passwd*
 
 # --- ESP32 firmware secrets (WiFi credentials, device identity) ---
 ESP32/config.h
+ESP32/main/config.h
 
 # --- Node / React (Dashboard) ---
 node_modules/
@@ -35,6 +37,8 @@ contracts/typechain/
 contracts/typechain-types/
 
 # --- Database ---
+# MongoDB data files (local dbpath for mongod) - hundreds of MB, never commit
+database/data/
 database/*.db
 database/*.sqlite3
 

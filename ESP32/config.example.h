@@ -16,9 +16,12 @@
 // gateway + Mosquitto (e.g. "192.168.1.100"), NOT "localhost" - the ESP32
 // is a separate physical device on the network, so "localhost" would
 // point it at itself.
-#define MQTT_BROKER_HOST "192.168.1.100"
+#define MQTT_BROKER_HOST "your-broker-lan-ip"
 #define MQTT_BROKER_PORT 1883
 #define MQTT_TOPIC "carbon/sensor01"
+// Only needed when Mosquitto has allow_anonymous false.
+#define MQTT_USERNAME "your-esp32-mqtt-username"
+#define MQTT_PASSWORD "your-esp32-mqtt-password"
 
 // --- Device identity ---
 // Must be unique per physical sensor node. This value becomes every
