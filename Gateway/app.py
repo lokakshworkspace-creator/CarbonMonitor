@@ -497,7 +497,7 @@ async def lifespan(app: FastAPI):
         mqtt_bridge.stop()
 
 
-app = FastAPI(title="Carbon Emission Gateway", lifespan=lifespan)
+app = FastAPI(title="CarbonMonitor Gateway", lifespan=lifespan)
 
 # The React dashboard is served by Vite's dev server on a different port
 # (5173 by default), so the browser treats its fetch() calls to this

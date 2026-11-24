@@ -131,7 +131,7 @@ function Shell() {
           <div className="hero-banner-scrim" />
           <div className="brand-mark">CO₂</div>
           <div>
-            <div className="brand-title">Carbon Monitor</div>
+            <div className="brand-title">CarbonMonitor</div>
             <div className="brand-subtitle">Blockchain + IoT</div>
           </div>
           <NotificationBell />
