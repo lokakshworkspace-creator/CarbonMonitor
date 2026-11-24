@@ -79,6 +79,8 @@ class Config:
     # into an accidental print(settings)/traceback.
     jwt_secret_key: str = field(repr=False)
     jwt_expiry_hours: int = 8
+    mqtt_username: str | None = None
+    mqtt_password: str | None = field(default=None, repr=False)
 
 
 def _require(raw: dict[str, str | None], errors: list[str], name: str) -> str | None:
@@ -212,6 +214,9 @@ def load_config() -> Config:
     if jwt_expiry_hours is not None and jwt_expiry_hours <= 0:
         errors.append("  - JWT_EXPIRY_HOURS must be > 0")
 
+    mqtt_username = os.getenv("MQTT_USERNAME")
+    mqtt_password = os.getenv("MQTT_PASSWORD")
+
     if errors:
         env_file_note = (
             f"(looked for {_ENV_PATH})" if _ENV_PATH.exists() else f"(no .env file found at {_ENV_PATH})"
@@ -240,6 +245,8 @@ def load_config() -> Config:
         mqtt_broker_host=raw["MQTT_BROKER_HOST"],  # type: ignore[arg-type]
         mqtt_broker_port=mqtt_broker_port,
         mqtt_topic=raw["MQTT_TOPIC"],  # type: ignore[arg-type]
+        mqtt_username=mqtt_username,
+        mqtt_password=mqtt_password,
         co2_warning_threshold=co2_warning_threshold,
         co2_critical_threshold=co2_critical_threshold,
         co2_hysteresis_readings=co2_hysteresis_readings,

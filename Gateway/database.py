@@ -28,6 +28,11 @@ REGIONS_COLLECTION_NAME = "regions"
 FACTORIES_COLLECTION_NAME = "factories"
 DEVICES_COLLECTION_NAME = "devices"
 NOTIFICATIONS_COLLECTION_NAME = "notifications"
+# Presentation-only DEMO_ESTIMATE readings from the physical MQ-135. A separate
+# collection on purpose: these are NOT measurements, so they must never share
+# sensor_data with hashed/anchored readings (verification, analytics, auto-
+# verify and the blockchain pipeline all read sensor_data and never this).
+DEMO_READINGS_COLLECTION_NAME = "demo_readings"
 
 _client: AsyncIOMotorClient = AsyncIOMotorClient(settings.mongo_uri)
 _db = _client[settings.mongo_db_name]
@@ -37,6 +42,7 @@ _regions_collection = _db[REGIONS_COLLECTION_NAME]
 _factories_collection = _db[FACTORIES_COLLECTION_NAME]
 _devices_collection = _db[DEVICES_COLLECTION_NAME]
 _notifications_collection = _db[NOTIFICATIONS_COLLECTION_NAME]
+_demo_readings_collection = _db[DEMO_READINGS_COLLECTION_NAME]
 
 
 def _to_api_dict(document: dict[str, Any], *object_id_fields: str) -> dict[str, Any]:
@@ -603,6 +609,72 @@ async def list_device_ids_in_scope(scope_filter: dict[str, Any]) -> list[str] | 
         doc["device_id"]
         async for doc in _devices_collection.find({"factory_id": {"$in": factory_ids}}, {"device_id": 1})
     ]
+
+
+# --- Demo-estimate storage (routers/demo_readings.py) ---
+#
+# A demo reading is hashed (the demo number takes the co2 slot of the canonical
+# hash) and anchored on Sepolia like a real record, but it lives HERE, flagged
+# as a demo (calibration_status / measurement_type), never in sensor_data. So
+# verification.py, the scheduler, analytics and every real-record count - which
+# all read sensor_data - never see it. Rows stored before anchoring existed have
+# no hash at all (hashed: False in the API).
+
+
+async def insert_demo_reading(
+    device_id: str,
+    demo_ppm: float,
+    raw_adc: Any,
+    v_pin: Any,
+    sensor_timestamp: str | None,
+    gateway_received_timestamp: str | None,
+    hash_value: str | None = None,
+) -> str:
+    document = {
+        "device_id": device_id,
+        "demo_ppm": demo_ppm,
+        "raw_adc": raw_adc,
+        "v_pin": v_pin,
+        "sensor_timestamp": sensor_timestamp,
+        "gateway_received_timestamp": gateway_received_timestamp,
+        "calibration_status": "DEMO_ESTIMATE",
+        "measurement_type": "ADC_DERIVED_DEMO",
+        "hash": hash_value,
+        "blockchain_tx_hash": None,
+        "blockchain_record_id": None,
+        "stored_at": datetime.now(timezone.utc).isoformat(),
+    }
+    result = await _demo_readings_collection.insert_one(document)
+    return str(result.inserted_id)
+
+
+async def update_demo_blockchain_info(record_id: str, tx_hash: str, blockchain_record_id: int) -> None:
+    await _demo_readings_collection.update_one(
+        {"_id": ObjectId(record_id)},
+        {"$set": {"blockchain_tx_hash": tx_hash, "blockchain_record_id": blockchain_record_id}},
+    )
+
+
+async def get_demo_readings(
+    limit: int, device_ids: list[str] | None = None, device_id: str | None = None
+) -> list[dict[str, Any]]:
+    """Newest first. device_id narrows to one device; device_ids is the
+    caller's in-scope set (None for an admin = no restriction), exactly as in
+    get_recent_records()."""
+    query: dict[str, Any] = {}
+    if device_id is not None:
+        query["device_id"] = device_id
+    elif device_ids is not None:
+        query["device_id"] = {"$in": device_ids}
+    cursor = _demo_readings_collection.find(query).sort("_id", -1).limit(limit)
+    rows = []
+    async for document in cursor:
+        row = _to_api_dict(document)
+        # The hash itself stays server-side; the API only says whether one exists
+        # (rows stored before anchoring existed have none).
+        row["hashed"] = row.pop("hash", None) is not None
+        rows.append(row)
+    return rows
 
 
 # --- Phase 3: chart-hydration reads (routers/readings.py) ---

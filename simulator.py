@@ -74,40 +74,100 @@ DEFAULT_INTERVAL_SECONDS = 20.0
 DEFAULT_SPIKE_PROBABILITY = 0.1
 DEFAULT_REFRESH_SECONDS = 60.0
 
-# Mild jitter around each device's own baseline - large enough to look
-# like a real noisy sensor, small enough that only a genuine spike
-# crosses into WARNING territory.
-NOISE_BAND_PPM = 30.0
 READING_FLOOR_PPM = 350.0
+# Hard ceiling, as a multiple of the critical threshold (so it follows the
+# gateway's configured thresholds): with the defaults this is 4000 ppm.
+READING_CEILING_FACTOR = 2.0
+
+# Calm readings jitter by a little more than this fixed amount, growing with
+# the level itself (a real sensor is noisier at high concentrations).
+BASE_NOISE_PPM = 15.0
+NOISE_PER_PPM = 0.04
+
+# How fast a reading moves toward its current target each tick, drawn fresh
+# every tick so ramps up and down look uneven rather than mechanical.
+APPROACH_MIN = 0.35
+APPROACH_MAX = 0.80
+
+# The kinds of excursion a device can start, and how likely each is (parallel
+# tuples). Their ppm ranges come from the gateway's thresholds, in
+# _excursion_range() below. Weighted so most excursions are mild and a minority
+# are severe, but all four really happen.
+EXCURSION_KINDS = ("elevated", "warning", "critical", "extreme")
+EXCURSION_WEIGHTS = (35, 30, 25, 10)
+EXCURSION_MIN_TICKS = 2
+EXCURSION_MAX_TICKS = 8
+
+
+def _excursion_range(kind: str) -> tuple[float, float]:
+    """(low, high) ppm for an excursion kind, derived from the gateway's own
+    configured thresholds rather than hardcoded, so the simulated data keeps
+    crossing the real boundaries if they are ever changed in .env."""
+    warning = settings.co2_warning_threshold
+    critical = settings.co2_critical_threshold
+    ceiling = critical * READING_CEILING_FACTOR
+    if kind == "elevated":  # approaching the warning line, still NORMAL
+        return warning * 0.6, warning * 0.99
+    if kind == "warning":  # into WARNING, below CRITICAL
+        return warning, critical * 0.99
+    if kind == "critical":  # clearly CRITICAL
+        return critical, critical * 1.6
+    return critical * 1.6, ceiling  # "extreme"
 
 
 class SimulatedDevice:
-    """One simulated device's own stable baseline, assigned once at first
-    sight rather than re-randomized every tick - a device should read
-    consistently between ticks, with an occasional spike being the
-    interesting event rather than constant unpredictable jumps."""
+    """One simulated device: its own resting level that drifts slowly, plus
+    random excursions (rises into elevated / WARNING / CRITICAL / extreme
+    territory that last a few ticks and then relax) and an occasional one-off
+    random reading anywhere in the whole range.
+
+    Unlike a fixed baseline with a single spike band, readings here are spread
+    across the full range (floor .. 2x the critical threshold) and every device
+    behaves differently over time, so charts, levels and alerts all get exercised.
+    Everything stays derived from the gateway's configured thresholds."""
 
     def __init__(self, device_id: str) -> None:
         self.device_id = device_id
-        # A plausible "normal" band comfortably under the warning
-        # threshold - same shape as tests/mqtt_test_publisher.py's own
-        # "normal" scenario range, so a simulated device's baseline looks
-        # like the same kind of reading a real ESP32 would report.
-        high = max(READING_FLOOR_PPM + 1.0, settings.co2_warning_threshold - 150)
-        self.baseline = round(random.uniform(READING_FLOOR_PPM, high), 1)
+        warning = settings.co2_warning_threshold
+        # Resting level: somewhere in the normal band, different per device.
+        self.baseline = random.uniform(READING_FLOOR_PPM, max(READING_FLOOR_PPM + 1.0, warning * 0.85))
+        self.value = self.baseline
+        self.target = self.baseline
+        self.excursion_ticks_left = 0
 
     def next_reading(self, spike_probability: float) -> float:
-        if random.random() < spike_probability:
-            # A clear excursion above the critical threshold, so
-            # threshold.py's real alert logic actually fires - the point
-            # of the spike is to prove the existing pipeline reacts to
-            # simulated data exactly as it would to real hardware, with
-            # no special-casing anywhere.
-            return round(
-                random.uniform(settings.co2_critical_threshold + 50, settings.co2_critical_threshold + 500), 1
-            )
-        noise = random.uniform(-NOISE_BAND_PPM, NOISE_BAND_PPM)
-        return max(READING_FLOOR_PPM, round(self.baseline + noise, 1))
+        warning = settings.co2_warning_threshold
+        ceiling = settings.co2_critical_threshold * READING_CEILING_FACTOR
+
+        # The resting level wanders a little over time (kept in the normal band).
+        self.baseline = min(
+            max(self.baseline + random.gauss(0.0, 12.0), READING_FLOOR_PPM + 20.0), warning * 0.85
+        )
+
+        # Start, continue or end an excursion.
+        if self.excursion_ticks_left > 0:
+            self.excursion_ticks_left -= 1
+            if self.excursion_ticks_left == 0:
+                self.target = self.baseline  # relax back
+        elif random.random() < spike_probability:
+            kind = random.choices(EXCURSION_KINDS, weights=EXCURSION_WEIGHTS)[0]
+            low, high = _excursion_range(kind)
+            self.target = random.uniform(low, high)
+            self.excursion_ticks_left = random.randint(EXCURSION_MIN_TICKS, EXCURSION_MAX_TICKS)
+        else:
+            self.target = self.baseline
+
+        # Move toward the target by a random fraction, plus level-dependent noise.
+        self.value += (self.target - self.value) * random.uniform(APPROACH_MIN, APPROACH_MAX)
+        self.value += random.gauss(0.0, BASE_NOISE_PPM + NOISE_PER_PPM * self.value)
+
+        reading = self.value
+        # Now and then a plain random reading anywhere in the range (a glitch, a
+        # gust, a door opening) that does not disturb the device's own trend.
+        if random.random() < spike_probability / 3.0:
+            reading = random.uniform(READING_FLOOR_PPM, ceiling)
+
+        return round(min(max(reading, READING_FLOOR_PPM), ceiling), 1)
 
 
 def _fetch_simulated_device_ids(mongo_client: MongoClient) -> list[str]:
@@ -144,6 +204,8 @@ def run(args: argparse.Namespace) -> None:
     # backoff inside paho's own background thread, no custom retry loop
     # needed here either.
     mqtt_client.reconnect_delay_set(min_delay=1, max_delay=30)
+    if settings.mqtt_username and settings.mqtt_password:
+        mqtt_client.username_pw_set(settings.mqtt_username, settings.mqtt_password)
     mqtt_client.connect(args.broker_host, args.broker_port)
     mqtt_client.loop_start()
     logger.info("Connected to MQTT broker %s:%s, topic %s", args.broker_host, args.broker_port, args.topic)
@@ -199,7 +261,11 @@ def main() -> None:
         "--spike-probability",
         type=float,
         default=DEFAULT_SPIKE_PROBABILITY,
-        help=f"Chance per device per tick of an above-critical-threshold reading (default {DEFAULT_SPIKE_PROBABILITY}).",
+        help=(
+            "Chance per device per tick of starting an excursion into elevated/WARNING/CRITICAL/extreme "
+            f"territory (default {DEFAULT_SPIKE_PROBABILITY}); one-off random readings anywhere in the "
+            "range occur at a third of this rate. 0 = calm readings only."
+        ),
     )
     parser.add_argument(
         "--refresh-interval",

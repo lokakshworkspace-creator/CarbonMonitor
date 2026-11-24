@@ -7,6 +7,7 @@ wired up here.
 
 import asyncio
 import logging
+import math
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, status
@@ -31,11 +32,13 @@ from database import (
     get_factory_and_region_for_device,
     get_recent_records,
     get_user_by_username,
+    insert_demo_reading,
     insert_sensor_record,
     list_device_ids_in_scope,
     mark_notification_delivered,
     touch_last_login,
     update_blockchain_info,
+    update_demo_blockchain_info,
     update_user,
 )
 from device_status import tracker as device_status_tracker
@@ -57,6 +60,7 @@ from notification_rooms import rooms as notification_rooms
 from routers import admin_devices, admin_factories, admin_regions, admin_users
 from routers import factories as factories_router
 from routers import notifications as notifications_router
+from routers import demo_readings as demo_readings_router
 from routers import readings as readings_router
 from routers import regions as regions_router
 from scheduler import scheduler as verification_scheduler
@@ -94,27 +98,136 @@ MAX_RECORDS_LIMIT = 500
 mqtt_queue: asyncio.Queue = asyncio.Queue()
 mqtt_bridge = MQTTBridge(mqtt_queue)
 
+# Physical devices whose readings are only trusted when the firmware says
+# calibration_status == "CALIBRATED". For these, a missing or unrecognised
+# status fails safe as UNCALIBRATED. Simulators are not listed: they send a
+# numeric co2 and no calibration_status, and behave exactly as before.
+#
+# Known limitation: uncalibrated readings are live-only. They are broadcast
+# over the WebSocket for the dashboard but are NOT stored in MongoDB, hashed
+# or anchored on-chain, so they do not appear in history or weekly analytics.
+CALIBRATION_REQUIRED_DEVICE_IDS = frozenset({"esp32-01"})
+
+# Presentation-only readings: firmware sends calibration_status "DEMO_ESTIMATE"
+# plus a separate "demo_ppm" (an ADC rescale, floor 400 and no upper cap, NOT a CO2
+# measurement). They are broadcast for the dashboard and never thresholded, and
+# never enter Pipeline B or sensor_data. They ARE hashed, stored and anchored,
+# but by their own task (_process_demo_storage) into a separate demo_readings
+# collection. "co2" is never populated from demo_ppm, so no downstream code can
+# mistake it for a reading.
+DEMO_ESTIMATE_STATUS = "DEMO_ESTIMATE"
+DEMO_PPM_MIN = 400.0
+# No cap on the demo scale itself (the firmware's formula keeps rising above the
+# observed peak, topping out near 5525 at ADC 4095). This is only a sanity
+# ceiling so a malformed/garbage value is not forwarded to the dashboard.
+DEMO_PPM_SANITY_MAX = 10000.0
+
 
 async def _consume_mqtt_messages() -> None:
     while True:
         message = await mqtt_queue.get()
 
+        # skip_pipelines defaults to True (safe). It is set to False only after
+        # the full validation block below succeeds. An exception anywhere in the
+        # try block leaves it True, so Pipeline B cannot run on a partially-
+        # processed or invalid message.
+        skip_pipelines = True
+        # Set only for a validated DEMO_ESTIMATE; drives the demo-only storage
+        # task below. Unrelated to Pipeline B (no hash, no blockchain).
+        demo_to_store: float | None = None
+
         try:
             device_id = message.get("device_id")
+            co2 = message.get("co2")
+            # calibration_status is NOT defaulted to "CALIBRATED" here.
+            # Simulators never send this field (None → not explicitly uncalibrated).
+            # The physical device always sends it once this firmware is flashed.
+            # Eligibility for the pipelines is determined by co2 numeric validity,
+            # not by calibration_status alone — this is the defence-in-depth guard.
+            calibration_status = message.get("calibration_status")
 
-            # Pure telemetry, emitted for every message that passed
-            # mqtt_client.py's validation and before either pipeline does
-            # anything with it. The dashboard's live chart needs a data
-            # point per reading, whereas threshold events fire only on
-            # state transitions. It deliberately reads nothing from and
-            # writes nothing to threshold.py, so it cannot perturb the
-            # cooldown/hysteresis state machine.
+            # Guard 1: explicit UNCALIBRATED flag from the physical device firmware.
+            is_explicitly_uncalibrated = (calibration_status == "UNCALIBRATED") or (
+                device_id in CALIBRATION_REQUIRED_DEVICE_IDS and calibration_status != "CALIBRATED"
+            )
+
+            # Guard 2: strong numeric validation using math.isfinite().
+            # Rejects None (JSON null), NaN, +/-Inf, and any non-numeric type.
+            # This is the primary safety net regardless of calibration_status.
+            co2_float: float | None = None
+            co2_is_finite = False
+            try:
+                co2_float = float(co2)  # type: ignore[arg-type]
+                co2_is_finite = math.isfinite(co2_float)
+            except (TypeError, ValueError):
+                pass  # co2_float stays None, co2_is_finite stays False
+
+            # Both guards must clear for the pipelines to run:
+            #   - must NOT be explicitly marked UNCALIBRATED
+            #   - co2 MUST be a finite number (passes even when calibration_status
+            #     is None/absent, as long as the numeric value is valid — this
+            #     preserves simulator compatibility without needing calibration_status)
+            # Guard 3: demo estimates never reach the threshold engine or Pipeline B,
+            # for ANY device (a simulator claiming DEMO_ESTIMATE is skipped too).
+            is_demo_estimate = calibration_status == DEMO_ESTIMATE_STATUS
+            demo_ppm: float | None = None
+            if is_demo_estimate:
+                try:
+                    candidate = float(message.get("demo_ppm"))  # type: ignore[arg-type]
+                    if math.isfinite(candidate) and DEMO_PPM_MIN <= candidate <= DEMO_PPM_SANITY_MAX:
+                        demo_ppm = candidate
+                except (TypeError, ValueError):
+                    pass
+                if demo_ppm is None:
+                    # Malformed demo reading: degrade to plain uncalibrated telemetry.
+                    is_demo_estimate = False
+                    is_explicitly_uncalibrated = True
+
+            skip_pipelines = is_explicitly_uncalibrated or is_demo_estimate or not co2_is_finite
+            if is_demo_estimate:
+                demo_to_store = demo_ppm
+
+            if skip_pipelines:
+                logger.info(
+                    "Skipping threshold and Pipeline B for %s: "
+                    "calibration_status=%r, co2=%r, co2_is_finite=%s",
+                    device_id, calibration_status, co2, co2_is_finite,
+                )
+
+            # Pure telemetry: broadcast SENSOR_READING for EVERY valid message,
+            # calibrated or not. The dashboard live chart needs a data point per
+            # reading; it already handles null co2 via classify() → 'UNKNOWN'.
             reading_event = build_event(
                 EventType.SENSOR_READING,
-                message=f"{device_id} reported {message.get('co2')} ppm",
+                message=(
+                    f"{device_id} demo estimate {demo_ppm:.0f} (NOT calibrated, raw_adc={message.get('raw_adc')})"
+                    if is_demo_estimate
+                    else f"{device_id} reported raw_adc={message.get('raw_adc')} "
+                    f"(calibration_status={calibration_status!r})"
+                    if skip_pipelines
+                    else f"{device_id} reported {co2_float} ppm"
+                ),
                 severity=Severity.INFO,
                 device_id=device_id,
-                data={"co2": message.get("co2")},
+                data={
+                    # Never forward a CO2 value for a message that skipped the
+                    # pipelines, so the dashboard cannot show it as a real reading.
+                    "co2": None if skip_pipelines else co2,
+                    "raw_adc": message.get("raw_adc"),               # passthrough
+                    "v_pin": message.get("v_pin"),                   # passthrough (ADC-derived estimate)
+                    # "UNCALIBRATED" whenever the gateway treated it as such (incl. the
+                    # esp32-01 fail-safe); otherwise passthrough, None for simulators.
+                    "calibration_status": (
+                        DEMO_ESTIMATE_STATUS
+                        if is_demo_estimate
+                        else "UNCALIBRATED" if is_explicitly_uncalibrated else calibration_status
+                    ),
+                    # Only populated for validated demo estimates; never co2.
+                    "demo_ppm": demo_ppm if is_demo_estimate else None,
+                    "measurement_type": message.get("measurement_type") if is_demo_estimate else None,
+                    # Lets the dashboard line a live demo point up with its stored copy.
+                    "sensor_timestamp": message.get("sensor_timestamp") if is_demo_estimate else None,
+                },
             )
             await manager.broadcast(reading_event.to_dict())
 
@@ -122,25 +235,91 @@ async def _consume_mqtt_messages() -> None:
             if online_event is not None:
                 await manager.broadcast(online_event.to_dict())
 
-            threshold_event = threshold_engine.evaluate(device_id, message.get("co2"))
-            if threshold_event is not None:
-                await manager.broadcast(threshold_event.to_dict())
-                # Phase 6: persistent + region-pushed notification for this
-                # same event. Spawned, not awaited - CLAUDE.md is explicit
-                # that Pipeline A must never wait on Mongo, and this writes
-                # to it. threshold_engine.evaluate() has already run and
-                # the WebSocket broadcast above has already gone out
-                # regardless of anything that happens in this task.
-                _spawn_notification(threshold_event, message.get("co2"))
+            # Threshold evaluation: only for validated, calibrated readings.
+            # Uses co2_float (already verified finite) — never the raw co2 value.
+            if not skip_pipelines:
+                threshold_event = threshold_engine.evaluate(device_id, co2_float)
+                if threshold_event is not None:
+                    await manager.broadcast(threshold_event.to_dict())
+                    _spawn_notification(threshold_event, co2_float)
+
         except Exception:
-            # Pipeline A must never die from one bad reading - log and keep
-            # draining the queue, per CLAUDE.md's "minimal failure handling".
+            # Pipeline A must never die from one bad reading — log and keep draining.
+            # skip_pipelines remains True (its safe default), so Pipeline B will not
+            # run for this message even though the except branch was taken.
             logger.exception("Pipeline A failed to process MQTT message: %r", message)
 
-        # Pipeline B (background): hashing + MongoDB. Spawned as its own task
-        # rather than awaited here, so it runs concurrently with - and can
-        # never delay - Pipeline A's WebSocket alert above.
-        _spawn_pipeline_b(message)
+        # Pipeline B is spawned OUTSIDE the try/except block above and AFTER all
+        # validation is complete. This structural separation guarantees:
+        #   1. An exception in Pipeline A cannot accidentally enable Pipeline B.
+        #   2. Pipeline B runs only after skip_pipelines was explicitly set to False
+        #      by the full validation block (finite co2, not uncalibrated).
+        if not skip_pipelines:
+            _spawn_pipeline_b(message)
+
+        # Demo estimates: hashed, stored and anchored by their own background
+        # task, in their own collection. Spawned outside the try block so
+        # Pipeline A never waits on MongoDB or the chain. It is NOT Pipeline B
+        # (a separate path that never touches sensor_data) and it never runs
+        # for a non-demo message.
+        if demo_to_store is not None:
+            _spawn_demo_storage(message, demo_to_store)
+
+
+async def _process_demo_storage(message: dict, demo_ppm: float) -> None:
+    """Hash, store and anchor one DEMO_ESTIMATE reading (demo_readings
+    collection). Mirrors Pipeline B's steps, with the demo number in the co2
+    slot of the canonical hash, but writes only to demo_readings - never to
+    sensor_data - so verification/analytics/the scheduler cannot see it."""
+    device_id = message.get("device_id")
+    try:
+        hash_value = generate_hash(device_id, demo_ppm, message.get("sensor_timestamp"))
+        record_id = await insert_demo_reading(
+            device_id=device_id,
+            demo_ppm=demo_ppm,
+            raw_adc=message.get("raw_adc"),
+            v_pin=message.get("v_pin"),
+            sensor_timestamp=message.get("sensor_timestamp"),
+            gateway_received_timestamp=message.get("gateway_received_timestamp"),
+            hash_value=hash_value,
+        )
+    except Exception:
+        # Minimal failure handling (CLAUDE.md): log it; the live broadcast
+        # already went out and nothing else depends on this write.
+        logger.exception("Could not store demo reading for %s", device_id)
+        return  # nothing to anchor without a stored, hashed record
+
+    try:
+        tx_result = await blockchain_client.store_hash(hash_value)
+        await update_demo_blockchain_info(record_id, tx_result["tx_hash"], tx_result["record_id"])
+        confirmed_event = build_event(
+            EventType.BLOCKCHAIN_CONFIRMED,
+            message=(
+                f"{device_id} (demo reading) hash anchored on-chain: tx {tx_result['tx_hash']}, "
+                f"record #{tx_result['record_id']}, block {tx_result['block_number']}"
+            ),
+            severity=Severity.INFO,
+            device_id=device_id,
+        )
+        await manager.broadcast(confirmed_event.to_dict())
+    except Exception as exc:
+        logger.exception("Demo reading blockchain submission failed for %s", device_id)
+        failed_event = build_event(
+            EventType.BLOCKCHAIN_FAILED,
+            message=f"{device_id} (demo reading) blockchain submission failed: {exc}",
+            severity=Severity.CRITICAL,
+            device_id=device_id,
+        )
+        await manager.broadcast(failed_event.to_dict())
+
+
+_demo_storage_tasks: set[asyncio.Task] = set()
+
+
+def _spawn_demo_storage(message: dict, demo_ppm: float) -> None:
+    task = asyncio.create_task(_process_demo_storage(message, demo_ppm))
+    _demo_storage_tasks.add(task)
+    task.add_done_callback(_demo_storage_tasks.discard)
 
 
 async def _process_pipeline_b(message: dict) -> None:
@@ -148,8 +327,26 @@ async def _process_pipeline_b(message: dict) -> None:
     co2 = message.get("co2")
     sensor_timestamp = message.get("sensor_timestamp")
 
+    # Defence-in-depth: even though _consume_mqtt_messages already guards
+    # skip_pipelines before spawning this task, we re-validate co2 here so
+    # that a future code path cannot accidentally reach generate_hash() with
+    # a non-numeric value and produce a TypeError or a meaningless hash.
     try:
-        hash_value = generate_hash(device_id, co2, sensor_timestamp)
+        co2_float = float(co2)  # type: ignore[arg-type]
+        if not math.isfinite(co2_float):
+            raise ValueError(f"co2 value {co2!r} is not finite")
+    except (TypeError, ValueError) as exc:
+        logger.error(
+            "Pipeline B: co2=%r for %s failed numeric validation (%s) — "
+            "skipping hash/DB/blockchain. The caller guard should have "
+            "prevented this; check _consume_mqtt_messages validation logic.",
+            co2, device_id, exc,
+        )
+        return
+
+    try:
+        # Use co2_float (already validated finite) for hashing and storage.
+        hash_value = generate_hash(device_id, co2_float, sensor_timestamp)
         hash_event = build_event(
             EventType.HASH_GENERATED,
             message=f"{device_id} reading hashed: {hash_value[:12]}...",
@@ -160,7 +357,7 @@ async def _process_pipeline_b(message: dict) -> None:
 
         record_id = await insert_sensor_record(
             device_id=device_id,
-            co2=co2,
+            co2=co2_float,
             sensor_timestamp=sensor_timestamp,
             gateway_received_timestamp=message.get("gateway_received_timestamp"),
             hash_value=hash_value,
@@ -294,7 +491,7 @@ async def lifespan(app: FastAPI):
     finally:
         consumer_task.cancel()
         device_timeout_task.cancel()
-        for task in list(_pipeline_b_tasks) + list(_notification_tasks):
+        for task in list(_pipeline_b_tasks) + list(_notification_tasks) + list(_demo_storage_tasks):
             task.cancel()
         verification_scheduler.stop()
         mqtt_bridge.stop()
@@ -326,6 +523,7 @@ app.include_router(admin_users.router)
 app.include_router(factories_router.router)
 app.include_router(regions_router.router)
 app.include_router(readings_router.router)
+app.include_router(demo_readings_router.router)
 app.include_router(notifications_router.router)
 app.include_router(notifications_router.ws_router)
 

@@ -45,6 +45,8 @@ class MQTTBridge:
     def start(self) -> None:
         """Must be called from a running event loop (e.g. FastAPI lifespan)."""
         self._loop = asyncio.get_running_loop()
+        if settings.mqtt_username and settings.mqtt_password:
+            self._client.username_pw_set(settings.mqtt_username, settings.mqtt_password)
         # connect_async + loop_start lets the broker be unreachable at
         # startup (or drop later) without raising here or blocking the
         # gateway - paho retries in the background using the delay above.
