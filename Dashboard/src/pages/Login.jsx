@@ -44,7 +44,7 @@ export default function Login() {
         <form className="card login-form" onSubmit={handleSubmit}>
           <div className="login-brand">
             <div className="brand-mark">CO₂</div>
-            <h1>Carbon Monitor</h1>
+            <h1>CarbonMonitor</h1>
           </div>
           <p className="page-subtitle login-subtitle">Sign in to continue.</p>
 
