@@ -79,8 +79,10 @@ Install via Arduino IDE's Boards Manager / Library Manager:
 
 ## Setup
 
-1. Copy `config.example.h` to `config.h` and fill in:
-   - Your real WiFi SSID/password
+1. Copy `config.example.h` to **`main/config.h`** (next to `main.ino`, which is
+   the sketch folder the Arduino IDE builds) and fill in:
+   - Your real WiFi SSID/password - **2.4 GHz, WPA2** (an ESP32 cannot join a
+     5 GHz-only or WPA3-only network)
    - `MQTT_BROKER_HOST` - the **LAN IP** of the machine running the
      FastAPI gateway + Mosquitto (not `localhost` - the ESP32 is a
      separate physical device on the network)
@@ -92,8 +94,11 @@ Install via Arduino IDE's Boards Manager / Library Manager:
    `Gateway/.env` vs `Gateway/.env.example` - never commit real WiFi
    credentials.
 
-2. Open `main.ino` in the Arduino IDE with the ESP32 board package
+2. Open `main/main.ino` in the Arduino IDE with the ESP32 board package
    selected, and flash it to the device.
+
+For wiring, the payload formats, network troubleshooting and the
+presentation demo mode, see [docs/HARDWARE.md](../docs/HARDWARE.md).
 
 ## Phase 5 bring-up sequence
 
@@ -120,12 +125,15 @@ though they will look like valid JSON and pass the gateway's validation:
 5. **Reflash** with the real R0 in place.
 6. **Only now** treat published readings as real CO2 estimates.
 
-Skipping straight to step 6 will not fail loudly at the network/JSON
-level - it will silently publish NaN-derived garbage as `co2`, since
-`R0_PLACEHOLDER_CALIBRATE_ME` is deliberately an impossible negative
-resistance value precisely so uncalibrated output doesn't look
-plausible. Watch the Serial monitor output during bring-up; a real
-reading should be a normal-looking number, not `nan`.
+Skipping straight to step 6 is safe: while `MQ135_R0` is still the
+placeholder, `R0_PLACEHOLDER_CALIBRATE_ME` is deliberately an impossible
+negative resistance, so the firmware cannot compute a CO2 value. It then
+publishes `co2: null` with `calibration_status: "UNCALIBRATED"` (or, in
+the presentation build, `"DEMO_ESTIMATE"` plus a separate `demo_ppm`). The
+gateway never hashes, stores as a measurement, alerts on, or anchors such
+a reading as CO2. Watch the Serial monitor during bring-up: a real
+reading prints "Estimated CO2 Concentration"; an uncalibrated one prints
+"[CALIBRATION REQUIRED]".
 
 ## Troubleshooting notes for Phase 5
 
