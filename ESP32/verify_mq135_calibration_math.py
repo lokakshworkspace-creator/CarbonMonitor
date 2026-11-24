@@ -18,7 +18,9 @@ Run: python ESP32/verify_mq135_calibration_math.py
 import math
 
 # --- Constants: must match mq135_calibration.h exactly ---
-MQ135_VCC = 3.3
+MQ135_SUPPLY_VCC = 5.0
+ESP32_ADC_VREF = 3.3
+MQ135_VOLTAGE_DIVIDER_RATIO = 2.0
 MQ135_RL_KOHM = 10.0
 MQ135_ADC_MAX_RAW = 4095
 
@@ -27,14 +29,20 @@ MQ135_PARB = 2.769034857
 MQ135_ATMOCO2_PPM = 397.13
 
 
-def raw_to_voltage(raw_adc: int) -> float:
-    return (raw_adc / MQ135_ADC_MAX_RAW) * MQ135_VCC
+def raw_to_pin_voltage(raw_adc: int) -> float:
+    return (raw_adc / MQ135_ADC_MAX_RAW) * ESP32_ADC_VREF
 
 
-def voltage_to_rs(voltage: float) -> float:
-    if voltage <= 0:
+def raw_to_sensor_voltage(raw_adc: int) -> float:
+    return raw_to_pin_voltage(raw_adc) * MQ135_VOLTAGE_DIVIDER_RATIO
+
+
+def voltage_to_rs(v_ao: float) -> float:
+    if v_ao <= 0:
         return math.inf
-    return MQ135_RL_KOHM * (MQ135_VCC - voltage) / voltage
+    if v_ao >= MQ135_SUPPLY_VCC:
+        return 0.001
+    return MQ135_RL_KOHM * (MQ135_SUPPLY_VCC - v_ao) / v_ao
 
 
 def rs_to_ppm(rs: float, r0: float) -> float:
@@ -57,17 +65,20 @@ def check(label: str, condition: bool) -> None:
 
 def main() -> None:
     # --- Check 1: raw ADC -> voltage is a clean linear mapping ---
-    check("raw=0 -> voltage=0.0V (bottom of range)", raw_to_voltage(0) == 0.0)
-    check("raw=4095 -> voltage=3.3V (full scale)", raw_to_voltage(MQ135_ADC_MAX_RAW) == MQ135_VCC)
-    midpoint_voltage = raw_to_voltage(2048)
-    check(f"raw=2048 -> voltage={midpoint_voltage:.4f}V (~half of 3.3V)", abs(midpoint_voltage - 1.65) < 0.001)
+    check("raw=0 -> pin voltage=0.0V (bottom of range)", raw_to_pin_voltage(0) == 0.0)
+    check("raw=4095 -> pin voltage=3.3V (full scale)", raw_to_pin_voltage(MQ135_ADC_MAX_RAW) == ESP32_ADC_VREF)
+    midpoint_vpin = raw_to_pin_voltage(2048)
+    check(f"raw=2048 -> pin voltage={midpoint_vpin:.4f}V (~half of 3.3V)", abs(midpoint_vpin - 1.65) < 0.001)
+
+    # Voltage divider scaling check
+    check("raw=2048 -> sensor AO voltage=3.30V (2x of pin voltage)", abs(raw_to_sensor_voltage(2048) - 3.30) < 0.002)
 
     # --- Check 2: voltage -> Rs, a clean round-number case ---
-    # At Vout = VCC/2, the divider is balanced, so Rs must equal RL
-    # exactly: Rs = RL*(VCC-Vout)/Vout = RL*(VCC/2)/(VCC/2) = RL.
-    rs_at_half_vcc = voltage_to_rs(MQ135_VCC / 2)
+    # At V_AO = VCC/2 (2.5V), the divider is balanced, so Rs must equal RL
+    # exactly: Rs = RL*(VCC-V_AO)/V_AO = RL*(2.5)/(2.5) = RL.
+    rs_at_half_vcc = voltage_to_rs(MQ135_SUPPLY_VCC / 2)
     check(
-        f"Rs at Vout=VCC/2 equals RL ({rs_at_half_vcc:.6f} == {MQ135_RL_KOHM})",
+        f"Rs at V_AO=VCC/2 equals RL ({rs_at_half_vcc:.6f} == {MQ135_RL_KOHM})",
         abs(rs_at_half_vcc - MQ135_RL_KOHM) < 1e-9,
     )
 
