@@ -45,6 +45,12 @@ import RealTimeData from './pages/RealTimeData.jsx'
 import SystemMonitor from './pages/SystemMonitor.jsx'
 import Verification from './pages/Verification.jsx'
 
+// Decorative factory-into-leaves scene behind every signed-in page, the same
+// artwork as the login page (see styles.css's ".app-bg" block). Purely visual:
+// set this to false to go back to the plain dark background - nothing else
+// needs to change.
+const SHOW_APP_BACKGROUND = true
+
 // Overview moved from "/" to "/overview" - see the module docstring.
 const NAV_ITEMS = [
   { to: '/overview', label: 'Overview' },
@@ -101,8 +107,20 @@ function AuthNav() {
 }
 
 function Shell() {
+  const { user, checking } = useAuth()
+  // The sidebar (nav, bell, connection status) is only for a signed-in user whose
+  // session the gateway has confirmed - never for a visitor with no session, nor
+  // while a restored token is still being checked (see AuthProvider.jsx).
+  const signedIn = user !== null && !checking
   return (
     <div className="app">
+      {SHOW_APP_BACKGROUND && signedIn && (
+        <div className="app-bg" aria-hidden="true">
+          <HeroScene className="app-bg-svg" preserveAspectRatio="xMidYMax meet" />
+          <div className="app-bg-scrim" />
+        </div>
+      )}
+      {signedIn && (
       <aside className="sidebar">
         {/* Hero background sits behind .brand only, faded back to the
             sidebar's own solid panel color before the nav links below -
@@ -139,6 +157,7 @@ function Shell() {
           <AppFooter compact />
         </div>
       </aside>
+      )}
 
       <main className="content">
         <Routes>

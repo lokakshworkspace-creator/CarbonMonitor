@@ -1276,6 +1276,35 @@ body {
   padding: 32px;
 }
 
+/* One centered column holds the card and the footer credit, so both share the
+   same left/right edges. Before this, the wrapper took the footer paragraph's
+   width (~480px) while the card stayed a fixed 320px against its left edge, so
+   the card looked off-center; and on a phone the fixed 320px card could not
+   fit. The column is capped at 380px and never wider than the viewport minus a
+   16px gutter on each side. */
+.login-column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: min(380px, calc(100vw - 32px));
+}
+
+.login-column .login-form {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.login-column .app-footer {
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 8px;
+  text-align: center;
+}
+
+.login-column .app-footer-mission {
+  max-width: none;
+}
+
 .login-brand {
   display: flex;
   align-items: center;
@@ -1550,6 +1579,43 @@ body {
    own border keeps full contrast regardless of where it lands. */
 .hero-banner.is-login .hero-banner-scrim {
   background: linear-gradient(180deg, color-mix(in srgb, var(--bg) 20%, transparent) 0%, var(--bg) 88%);
+}
+
+/* --- Whole-dashboard background (App.jsx's SHOW_APP_BACKGROUND) ---
+   The login page's factory-into-leaves scene, fixed behind every signed-in
+   page. z-index: -1 puts it above the body background but below all content,
+   so no other element's stacking changes. It starts after the sidebar (which is
+   opaque), is non-interactive, and sits under a scrim that keeps the page text
+   at its usual contrast; cards are opaque, so it shows in the gaps around them.
+   To remove: set SHOW_APP_BACKGROUND to false in App.jsx (this block can stay). */
+
+.app-bg {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 232px; /* the sidebar's width - see .app */
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.app-bg-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.8;
+}
+
+.app-bg-scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg) 55%, transparent) 0%,
+    color-mix(in srgb, var(--bg) 30%, transparent) 100%
+  );
 }
 
 /* --- Footer / about section (components/AppFooter.jsx) --- */

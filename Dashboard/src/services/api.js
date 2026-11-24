@@ -17,21 +17,24 @@
 // is smoke-tested against a running gateway outside the browser.
 export const GATEWAY_URL = (import.meta.env?.VITE_GATEWAY_URL ?? 'http://localhost:8000').replace(/\/$/, '')
 
-// Phase 7 replaces the Phase 3 manual devtools-console workaround with a
-// real login page, but keeps the same storage location and key - a token
-// set the old way during this transition still works, and nothing else
-// that already reads getStoredToken() (notificationSocket.js) needs to
-// change. localStorage over in-memory-only storage is a deliberate
-// choice: it survives a page reload/tab reopen without forcing a
-// re-login every time, which is what an in-memory-only token would do
-// the moment the SPA remounts. The standard tradeoff (a token in
-// localStorage is readable by any script that runs on this origin, i.e.
-// an XSS vector) is accepted here the same way the rest of this
-// project's security posture is scoped - CLAUDE.md frames this whole
-// thing as a demonstrable capstone prototype, not a hardened production
-// system, and nothing else in this codebase introduces an XSS vector for
-// a stolen token to matter through.
+// The session token lives in sessionStorage, NOT localStorage: it survives a
+// refresh of the same tab, but is gone when the tab is closed, and a new tab
+// (e.g. typing /overview or /dashboard into the address bar) starts with no
+// session and goes to /login. With localStorage the token stayed in the browser
+// for its whole 8h lifetime, so typing a protected URL later silently logged
+// you back in. The standard tradeoff (a token in web storage is readable by any
+// script on this origin) is unchanged and accepted for this prototype.
+//
+// This is UX only: the gateway checks the token on every request regardless.
 const TOKEN_STORAGE_KEY = 'carbon_monitor_token'
+
+// One-time cleanup: earlier versions kept the token in localStorage. Remove any
+// such leftover so an old saved login can no longer restore a session.
+try {
+  localStorage.removeItem(TOKEN_STORAGE_KEY)
+} catch {
+  // storage unavailable: nothing to clean up
+}
 
 /** Read the stored token - exported so notificationSocket.js (Phase 6)
  * can attach it to the WebSocket URL as a query param (a browser
@@ -39,7 +42,7 @@ const TOKEN_STORAGE_KEY = 'carbon_monitor_token'
  * a session from a page reload. */
 export function getStoredToken() {
   try {
-    return localStorage.getItem(TOKEN_STORAGE_KEY)
+    return sessionStorage.getItem(TOKEN_STORAGE_KEY)
   } catch {
     return null
   }
@@ -48,7 +51,7 @@ export function getStoredToken() {
 /** Called by AuthContext.login() on a successful POST /api/auth/login. */
 export function setStoredToken(token) {
   try {
-    localStorage.setItem(TOKEN_STORAGE_KEY, token)
+    sessionStorage.setItem(TOKEN_STORAGE_KEY, token)
   } catch {
     // Same defensive stance as getStoredToken(): a locked-down browser
     // context must not crash the login flow, just fail to persist it
@@ -59,7 +62,8 @@ export function setStoredToken(token) {
 /** Called by AuthContext.logout() and by the 401 handler below. */
 export function clearStoredToken() {
   try {
-    localStorage.removeItem(TOKEN_STORAGE_KEY)
+    sessionStorage.removeItem(TOKEN_STORAGE_KEY)
+    localStorage.removeItem(TOKEN_STORAGE_KEY) // legacy location, see above
   } catch {
     // ignore, see getStoredToken()
   }
@@ -113,6 +117,17 @@ export function onUnauthorized(listener) {
   return () => window.removeEventListener(UNAUTHORIZED_EVENT, listener)
 }
 
+/**
+ * Asks the gateway whether the stored token is actually valid (any role).
+ * lib/jwt.js only DECODES a token - it cannot check the signature - so on its
+ * own a forged or revoked token would still unlock the client-side route guard.
+ * A 401 here clears the token and fires the unauthorized event (see _request),
+ * which sends the user to /login.
+ */
+export function verifySession() {
+  return _request('/api/regions/me')
+}
+
 /** GET /health -> { status, mqtt_broker, mqtt_topic, ... } */
 export function getHealth() {
   return _request('/health')
@@ -136,6 +151,20 @@ export function getRecords(limit = 20) {
  */
 export function getAnchoredRecords() {
   return _request('/records?anchored=true')
+}
+
+/**
+ * GET /api/demo-readings?device_id=&limit= -> newest first
+ * [{ id, device_id, demo_ppm, raw_adc, v_pin, sensor_timestamp, ... }, ...]
+ *
+ * The physical board's stored DEMO_ESTIMATE readings: presentation estimates
+ * with no hash and no blockchain record, in their own collection - not the
+ * records /records returns, and never verifiable.
+ */
+export function getDemoReadings({ deviceId = null, limit = 500 } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (deviceId !== null) params.set('device_id', deviceId)
+  return _request(`/api/demo-readings?${params}`)
 }
 
 /** GET /records/stats -> { total, anchored } */

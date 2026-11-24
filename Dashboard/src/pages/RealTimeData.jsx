@@ -21,14 +21,22 @@ import { useMemo, useState } from 'react'
 
 import Co2Chart from '../components/Co2Chart.jsx'
 import Co2Gauge from '../components/Co2Gauge.jsx'
+import {
+  DEMO_COLOR,
+  DEMO_LABEL,
+  DemoEstimateChart,
+  DemoReadingValue,
+} from '../components/DemoEstimate.jsx'
 import { ChartIcon } from '../components/icons.jsx'
 import WeeklyAnalytics from '../components/WeeklyAnalytics.jsx'
 import { useEventStream } from '../context/eventStreamContext.js'
 import { useAnalytics } from '../hooks/useAnalytics.js'
+import { useDeviceRegistry } from '../hooks/useDeviceRegistry.js'
 import { useDevices } from '../hooks/useDevices.js'
-import { useReadings } from '../hooks/useReadings.js'
+import { getDemoHistoryDeviceIds, useReadings } from '../hooks/useReadings.js'
 import { useThresholds } from '../hooks/useThresholds.js'
 import { currentAlertState } from '../lib/alerts.js'
+import { DEMO_BANDS, DEMO_BANDS_LABEL, DEMO_GAUGE_THRESHOLDS } from '../lib/demoBands.js'
 import { LEVEL_COLOR } from '../lib/levels.js'
 
 const ANALYTICS_DAYS = 7
@@ -48,10 +56,52 @@ export default function RealTimeData() {
   // returns devices in first-seen order (a plain Python dict preserves
   // insertion order), so "the first device" is already stable across
   // refetches without needing to be locked in separately.
+  //
+  // The dropdown lists the REGISTRY (every device in the caller's factories,
+  // grouped by factory - see useDeviceRegistry.js), not just devices that have
+  // sent a message since the gateway started, so simulated factories can be
+  // picked too (they show their stored history even while nothing publishes).
+  // Live devices missing from the registry still appear, under "Other devices".
+  // Default stays the first live device, falling back to the first registered one.
+  const { groups } = useDeviceRegistry()
   const [manualSelection, setManualSelection] = useState(null)
-  const selectedDeviceId = manualSelection ?? devices[0]?.device_id ?? null
+  const selectedDeviceId = manualSelection ?? devices[0]?.device_id ?? groups[0]?.devices[0]?.device_id ?? null
 
-  const { points, current, level } = useReadings(thresholds, selectedDeviceId)
+  // The dropdown shows one entry per FACTORY, by name. Choosing it opens that
+  // factory's device: the one that has been sending (or that has demo history
+  // saved in this browser), otherwise the first listed. A factory with several
+  // devices therefore shows just one of them here.
+  const liveStatus = new Map(devices.map((device) => [device.device_id, device]))
+  const savedDemoIds = new Set(getDemoHistoryDeviceIds())
+  const pickDevice = (factoryDevices) =>
+    (
+      factoryDevices.find((device) => liveStatus.has(device.device_id)) ??
+      factoryDevices.find((device) => savedDemoIds.has(device.device_id)) ??
+      factoryDevices[0]
+    ).device_id
+  const factoryOptions = groups.map(({ factory, devices: factoryDevices }) => ({
+    factory,
+    deviceId: pickDevice(factoryDevices),
+    deviceIds: factoryDevices.map((device) => device.device_id),
+  }))
+  const registeredIds = new Set(factoryOptions.flatMap((option) => option.deviceIds))
+  const unregisteredLive = devices.filter((device) => !registeredIds.has(device.device_id))
+  const hasAnyDevice = factoryOptions.length > 0 || unregisteredLive.length > 0
+  const OTHER_PREFIX = 'device:'
+  const selectedOptionValue =
+    factoryOptions.find((option) => option.deviceIds.includes(selectedDeviceId))?.factory.id ??
+    (selectedDeviceId !== null ? `${OTHER_PREFIX}${selectedDeviceId}` : '')
+  function handleDropdownChange(value) {
+    if (value.startsWith(OTHER_PREFIX)) {
+      setManualSelection(value.slice(OTHER_PREFIX.length))
+      return
+    }
+    const option = factoryOptions.find((candidate) => candidate.factory.id === value)
+    if (option) setManualSelection(option.deviceId)
+  }
+
+  const { points, demoPoints, demoLevel, current, level } = useReadings(thresholds, selectedDeviceId)
+  const isDemo = level === 'DEMO_ESTIMATE'
 
   const [chartTab, setChartTab] = useState('live')
   const { data: weeklyData, error: weeklyError } = useAnalytics(selectedDeviceId, ANALYTICS_DAYS)
@@ -75,13 +125,19 @@ export default function RealTimeData() {
         </div>
         <select
           className="device-select"
-          value={selectedDeviceId ?? ''}
-          disabled={devices.length === 0}
-          onChange={(e) => setManualSelection(e.target.value)}
+          value={selectedOptionValue}
+          disabled={!hasAnyDevice}
+          onChange={(e) => handleDropdownChange(e.target.value)}
         >
-          {devices.length === 0 && <option value="">No devices yet</option>}
-          {devices.map((device) => (
-            <option key={device.device_id} value={device.device_id}>
+          {!hasAnyDevice && <option value="">No factories yet</option>}
+          {factoryOptions.map(({ factory, deviceId }) => (
+            <option key={factory.id} value={factory.id}>
+              {factory.name} {liveStatus.get(deviceId)?.online ? '●' : '○'}
+            </option>
+          ))}
+          {/* A live device that is not in any registered factory: shown by its id, last. */}
+          {unregisteredLive.map((device) => (
+            <option key={device.device_id} value={`${OTHER_PREFIX}${device.device_id}`}>
               {device.device_id} {device.online ? '●' : '○'}
             </option>
           ))}
@@ -94,22 +150,45 @@ export default function RealTimeData() {
         <div className="stat-row">
           <div className="card stat-card">
             <div className="stat-label">Current reading</div>
-            <div className="stat-value" style={{ color: LEVEL_COLOR[level] ?? 'var(--text)' }}>
-              {current ? current.co2 : '—'}
-              <span className="stat-unit">ppm</span>
+            <div
+              className="stat-value"
+              style={{ color: isDemo ? (LEVEL_COLOR[demoLevel] ?? DEMO_COLOR) : (LEVEL_COLOR[level] ?? 'var(--text)') }}
+            >
+              {isDemo ? (
+                <DemoReadingValue current={current} />
+              ) : (
+                <>
+                  {level === 'UNCALIBRATED' ? 'Uncalibrated' : current ? current.co2 : '—'}
+                  {level !== 'UNCALIBRATED' && <span className="stat-unit">ppm</span>}
+                </>
+              )}
             </div>
-            <div className="stat-sub">{current ? `at ${current.time}` : 'waiting for first reading'}</div>
+            <div className="stat-sub">
+              {isDemo ? null : level === 'UNCALIBRATED'
+                ? // v_pin is an ADC-derived estimate, not a verified voltage.
+                  `raw ADC ${current.raw_adc ?? '—'}` +
+                  (Number.isFinite(current.v_pin) ? ` · ~${current.v_pin.toFixed(2)} V (est.)` : '') +
+                  ` · at ${current.time}`
+                : current
+                  ? `at ${current.time}`
+                  : 'waiting for first reading'}
+            </div>
           </div>
 
           <div className="card stat-card">
             <div className="stat-label">Level</div>
-            <div className="stat-value" style={{ color: LEVEL_COLOR[level] ?? 'var(--text-dim)' }}>
-              {level}
+            <div
+              className="stat-value"
+              style={{ color: isDemo ? (LEVEL_COLOR[demoLevel] ?? DEMO_COLOR) : (LEVEL_COLOR[level] ?? 'var(--text-dim)') }}
+            >
+              {isDemo ? `${demoLevel ?? 'UNKNOWN'} (demo)` : level}
             </div>
             <div className="stat-sub">
-              {thresholds
-                ? `warning ≥ ${thresholds.warning}, critical ≥ ${thresholds.critical} ppm`
-                : 'loading thresholds…'}
+              {isDemo
+                ? `${DEMO_BANDS_LABEL} · warning ≥ ${DEMO_BANDS.warning}, critical > ${DEMO_BANDS.critical} demo ppm · not the real thresholds`
+                : thresholds
+                  ? `warning ≥ ${thresholds.warning}, critical ≥ ${thresholds.critical} ppm`
+                  : 'loading thresholds…'}
             </div>
           </div>
 
@@ -122,9 +201,18 @@ export default function RealTimeData() {
       </section>
 
       <section className="section">
-        <h2>Current level</h2>
+        <h2>{isDemo ? `Current level (${DEMO_LABEL} · ${DEMO_BANDS_LABEL})` : 'Current level'}</h2>
         <div className="card card-pad">
-          <Co2Gauge co2={current?.co2} level={level} thresholds={thresholds} />
+          {isDemo ? (
+            <Co2Gauge
+              co2={current?.demo_ppm}
+              level={demoLevel}
+              thresholds={DEMO_GAUGE_THRESHOLDS}
+              unit="demo ppm"
+            />
+          ) : (
+            <Co2Gauge co2={current?.co2} level={level} thresholds={thresholds} />
+          )}
         </div>
       </section>
 
@@ -134,7 +222,11 @@ export default function RealTimeData() {
             <span className="card-icon-badge is-chart" aria-hidden="true">
               <ChartIcon />
             </span>
-            {chartTab === 'live' ? 'Recent readings (ppm)' : `Last ${ANALYTICS_DAYS} days (ppm)`}
+            {chartTab === 'live'
+              ? isDemo
+                ? 'Estimated demo readings'
+                : 'Recent readings (ppm)'
+              : `Last ${ANALYTICS_DAYS} days (ppm)`}
           </h2>
           <div className="filters">
             {CHART_TABS.map(({ key, label }) => (
@@ -147,7 +239,9 @@ export default function RealTimeData() {
                 {label}
               </button>
             ))}
-            {chartTab === 'live' && <span className="dim count">{points.length} points</span>}
+            {chartTab === 'live' && (
+              <span className="dim count">{isDemo ? demoPoints.length : points.length} points</span>
+            )}
           </div>
         </div>
         <div className="card card-pad">
@@ -155,7 +249,11 @@ export default function RealTimeData() {
               an overlay on the live chart, per the two views having no
               shared x-axis (per-reading vs per-day). */}
           {chartTab === 'live' ? (
-            <Co2Chart points={points} thresholds={thresholds} />
+            isDemo ? (
+              <DemoEstimateChart points={demoPoints} />
+            ) : (
+              <Co2Chart points={points} thresholds={thresholds} />
+            )
           ) : (
             <WeeklyAnalytics days={weeklyData} thresholds={thresholds} error={weeklyError} />
           )}

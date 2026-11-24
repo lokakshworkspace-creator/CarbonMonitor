@@ -14,9 +14,14 @@ import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/authContext.js'
 
 export default function RequireAuth({ roles, children }) {
-  const { user } = useAuth()
+  const { user, checking } = useAuth()
   const location = useLocation()
 
+  // A restored token is only decoded client-side until the gateway confirms it
+  // (see AuthProvider); show nothing protected in the meantime.
+  if (user && checking) {
+    return <div className="empty">Checking session…</div>
+  }
   if (!user) {
     return <Navigate to="/login" state={{ from: location }} replace />
   }

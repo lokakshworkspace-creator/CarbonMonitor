@@ -7,7 +7,9 @@
 
 import { LEVEL_COLOR } from '../lib/levels.js'
 
-export default function Co2Gauge({ co2, level, thresholds }) {
+// `unit` is only overridden for demo-estimate readings ("demo ppm"); real
+// readings keep the default.
+export default function Co2Gauge({ co2, level, thresholds, unit = 'ppm' }) {
   if (thresholds === null) {
     return <div className="empty">Loading thresholds…</div>
   }
@@ -46,7 +48,7 @@ export default function Co2Gauge({ co2, level, thresholds }) {
         <span style={{ left: `${criticalAt}%` }} className="gauge-tick">
           {thresholds.critical}
         </span>
-        <span className="gauge-max">{Math.round(max)} ppm</span>
+        <span className="gauge-max">{Math.round(max)} {unit}</span>
       </div>
     </div>
   )

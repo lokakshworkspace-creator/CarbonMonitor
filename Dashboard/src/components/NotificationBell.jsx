@@ -19,6 +19,7 @@
 import { useState } from 'react'
 
 import EmptyState from './EmptyState.jsx'
+import { useDemoAlerts } from '../hooks/useDemoAlerts.js'
 import { useNotifications } from '../hooks/useNotifications.js'
 
 const SEVERITY_LABEL = { warning: 'WARNING', critical: 'CRITICAL' }
@@ -47,28 +48,43 @@ function NotificationRow({ notification, onMarkSeen, onAcknowledge }) {
       <div className="notif-row-message">{notification.message}</div>
       <div className="notif-row-meta dim">
         <span className="mono">{notification.device_id}</span>
-        <span>{notification.co2_value} ppm</span>
+        <span>
+          {notification.co2_value} {notification.demo ? 'demo ppm' : 'ppm'}
+        </span>
       </div>
       <div className="notif-row-actions">
         <button type="button" className="chip" onClick={() => onMarkSeen(notification.id)}>
           Mark seen
         </button>
-        <button
-          type="button"
-          className={notification.acknowledged ? 'chip active' : 'chip'}
-          disabled={notification.acknowledged}
-          onClick={() => onAcknowledge(notification.id)}
-        >
-          {notification.acknowledged ? 'Acknowledged' : 'Acknowledge'}
-        </button>
+        {/* Demo notifications are browser-only, so there is nothing to acknowledge server-side. */}
+        {!notification.demo && (
+          <button
+            type="button"
+            className={notification.acknowledged ? 'chip active' : 'chip'}
+            disabled={notification.acknowledged}
+            onClick={() => onAcknowledge(notification.id)}
+          >
+            {notification.acknowledged ? 'Acknowledged' : 'Acknowledge'}
+          </button>
+        )}
       </div>
     </div>
   )
 }
 
 export default function NotificationBell() {
-  const { notifications, unseenCount, toasts, markSeen, acknowledge, dismissToast } = useNotifications()
+  const real = useNotifications()
+  const demo = useDemoAlerts()
   const [open, setOpen] = useState(false)
+
+  // Real (gateway-saved) notifications and browser-only demo ones share the
+  // bell; demo ids/keys are prefixed "demo-" so each action goes to its owner.
+  const notifications = [...demo.notifications, ...real.notifications]
+  const unseenCount = notifications.length
+  const toasts = [...demo.toasts, ...real.toasts]
+  const { acknowledge } = real
+  const markSeen = (id) => (String(id).startsWith('demo-') ? demo.markSeen(id) : real.markSeen(id))
+  const dismissToast = (key) => (String(key).startsWith('demo-') ? demo.dismissToast(key) : real.dismissToast(key))
 
   return (
     <div className="notif-bell-wrap">

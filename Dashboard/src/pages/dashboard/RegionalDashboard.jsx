@@ -23,6 +23,7 @@ import { FactoryIcon } from '../../components/icons.jsx'
 import { useAuth } from '../../context/authContext.js'
 import { useEventStream } from '../../context/eventStreamContext.js'
 import { useThresholds } from '../../hooks/useThresholds.js'
+import { classifyDemo } from '../../lib/demoBands.js'
 import { classify } from '../../lib/levels.js'
 import { getFactoryDevices, getMyFactories, getMyRegion } from '../../services/api.js'
 
@@ -41,7 +42,17 @@ function FactoryTile({ factory, status }) {
         <div className="factory-card-name">{factory.name}</div>
       </div>
       <div className="dim">{factory.location || 'No location set'}</div>
-      <div className="factory-card-reading mono">{status ? `${status.co2} ppm` : 'No live reading yet'}</div>
+      <div className="factory-card-reading mono">
+        {status
+          ? status.demo
+            ? `${status.demoPpm} demo ppm`
+            : status.uncalibrated
+            ? // v_pin is an ADC-derived estimate, not a verified voltage.
+              `Uncalibrated · ADC ${status.rawAdc ?? '—'}` +
+              (Number.isFinite(status.vPin) ? ` · ~${status.vPin.toFixed(2)} V (est.)` : '')
+            : `${status.co2} ppm`
+          : 'No live reading yet'}
+      </div>
       <span className={factory.is_simulated ? 'badge badge-pending' : 'badge badge-online'}>
         {factory.is_simulated ? 'Simulated' : 'Real'}
       </span>
@@ -104,7 +115,14 @@ export default function RegionalDashboard() {
       if (!deviceIds || deviceIds.length === 0) continue
       const latest = events.find((e) => e.event_type === 'SENSOR_READING' && deviceIds.includes(e.device_id))
       if (latest) {
-        status[factory.id] = { co2: latest.data.co2, level: classify(latest.data.co2, thresholds) }
+        status[factory.id] =
+          latest.data.calibration_status === 'DEMO_ESTIMATE'
+            ? // Presentation demo value: never classified as a CO2 level.
+              { co2: null, level: classifyDemo(latest.data.demo_ppm), demo: true, demoPpm: latest.data.demo_ppm, rawAdc: latest.data.raw_adc }
+            : latest.data.calibration_status === 'UNCALIBRATED'
+              ? // Never classified as NORMAL (or any CO2 level): there is no CO2 value.
+                { co2: null, level: 'UNCALIBRATED', uncalibrated: true, rawAdc: latest.data.raw_adc, vPin: latest.data.v_pin }
+              : { co2: latest.data.co2, level: classify(latest.data.co2, thresholds) }
       }
     }
     return status

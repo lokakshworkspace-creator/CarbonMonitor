@@ -13,7 +13,8 @@ import { useEffect, useState } from 'react'
 import EmptyState from '../components/EmptyState.jsx'
 import RecordAnchorFilter from '../components/RecordAnchorFilter.jsx'
 import { useEventStream } from '../context/eventStreamContext.js'
-import { filterByAnchor } from '../lib/records.js'
+import { useDemoReadings } from '../hooks/useDemoReadings.js'
+import { demoAnchorState, filterByAnchor, mergeWithDemo } from '../lib/records.js'
 import { getAnchoredRecords, getRecords } from '../services/api.js'
 
 // Pulled up from the GET /records default so anchored records from earlier
@@ -36,6 +37,9 @@ export default function BlockchainLogs() {
   const [anchoredRecords, setAnchoredRecords] = useState([])
   const [error, setError] = useState(null)
   const [filter, setFilter] = useState('all')
+  // The board's stored demo estimates, listed in the "All" view as "Demo" rows:
+  // never hashed and never sent to Sepolia, so they have no record # or transaction.
+  const demoReadings = useDemoReadings()
 
   // Refetched whenever Pipeline B stores or confirms a reading, so a
   // reading that just anchored moves from "Pending" to its tx hash
@@ -75,6 +79,8 @@ export default function BlockchainLogs() {
   const anchoredCount = anchoredRecords.length
 
   const visibleRecords = filter === 'anchored' ? anchoredRecords : filterByAnchor(records, filter)
+  const rows = filter === 'all' ? mergeWithDemo(visibleRecords, demoReadings) : visibleRecords
+  const demoRowCount = rows.length - visibleRecords.length
 
   return (
     <div className="page">
@@ -90,18 +96,24 @@ export default function BlockchainLogs() {
           visibleCount={visibleRecords.length}
           totalCount={filter === 'anchored' ? anchoredRecords.length : records.length}
         />
+        {demoRowCount > 0 && (
+          <p className="dim">
+            Includes {demoRowCount} live reading{demoRowCount === 1 ? '' : 's'} from the board (shown as
+            demo ppm), hashed and anchored on Sepolia like the others.
+          </p>
+        )}
         <div className="card">
           {error && <div className="empty error-text">{error}</div>}
-          {!error && records.length === 0 && anchoredRecords.length === 0 && (
+          {!error && records.length === 0 && anchoredRecords.length === 0 && rows.length === 0 && (
             <EmptyState>
               No records yet. Publish a reading with{' '}
               <code>python tests/mqtt_test_publisher.py --scenario normal</code>
             </EmptyState>
           )}
-          {!error && (records.length > 0 || anchoredRecords.length > 0) && visibleRecords.length === 0 && (
+          {!error && (records.length > 0 || anchoredRecords.length > 0) && rows.length === 0 && (
             <EmptyState>No {filter === 'anchored' ? 'anchored' : 'pending'} records in view.</EmptyState>
           )}
-          {!error && visibleRecords.length > 0 && (
+          {!error && rows.length > 0 && (
             <table className="table">
               <thead>
                 <tr>
@@ -114,7 +126,46 @@ export default function BlockchainLogs() {
                 </tr>
               </thead>
               <tbody>
-                {visibleRecords.map((record) => {
+                {rows.map((record) => {
+                  if (record.isDemo) {
+                    const state = demoAnchorState(record)
+                    return (
+                      <tr key={record.id} className={state === 'anchored' ? undefined : 'row-pending'}>
+                        <td className="mono">{record.device_id}</td>
+                        <td>{record.demo_ppm} demo ppm</td>
+                        <td className="mono dim">{record.sensor_timestamp}</td>
+                        <td>
+                          {state === 'anchored' ? (
+                            <span className="badge badge-online">#{record.blockchain_record_id}</span>
+                          ) : (
+                            <span className="dim">—</span>
+                          )}
+                        </td>
+                        <td>
+                          {state === 'anchored' ? (
+                            <a
+                              className="mono tx-link"
+                              title={record.blockchain_tx_hash}
+                              href={`https://sepolia.etherscan.io/tx/${record.blockchain_tx_hash}`}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              {truncateHash(record.blockchain_tx_hash)} ↗
+                            </a>
+                          ) : (
+                            <span className="dim">{state === 'pending' ? 'not yet submitted' : 'not sent to Sepolia'}</span>
+                          )}
+                        </td>
+                        <td>
+                          {state === 'anchored' ? (
+                            <span className="badge badge-online">Anchored</span>
+                          ) : (
+                            <span className="badge badge-pending">{state === 'pending' ? 'Pending' : 'Not anchored'}</span>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  }
                   const anchored = record.blockchain_record_id !== null
                   return (
                     <tr key={record.id} className={anchored ? undefined : 'row-pending'}>

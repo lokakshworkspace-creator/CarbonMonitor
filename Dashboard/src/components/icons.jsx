@@ -172,12 +172,14 @@ export function ClimateBadgeIcon({ className, size = 15 }) {
  * reachable by keyboard nav or intercept a click meant for the content in
  * front of it.
  */
-export function HeroScene({ className }) {
+// `preserveAspectRatio` defaults to the original left-anchored crop used by the
+// login page and sidebar; the whole-dashboard background passes its own.
+export function HeroScene({ className, preserveAspectRatio = 'xMinYMid slice' }) {
   return (
     <svg
       className={className}
       viewBox="0 0 800 300"
-      preserveAspectRatio="xMinYMid slice"
+      preserveAspectRatio={preserveAspectRatio}
       aria-hidden="true"
       focusable="false"
     >

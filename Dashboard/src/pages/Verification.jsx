@@ -18,7 +18,8 @@ import RecordAnchorFilter from '../components/RecordAnchorFilter.jsx'
 import RecordPicker from '../components/RecordPicker.jsx'
 import VerificationResult from '../components/VerificationResult.jsx'
 import { useEventStream } from '../context/eventStreamContext.js'
-import { filterByAnchor } from '../lib/records.js'
+import { useDemoReadings } from '../hooks/useDemoReadings.js'
+import { filterByAnchor, mergeWithDemo } from '../lib/records.js'
 import { getAnchoredRecords, getRecords, verifyRecord } from '../services/api.js'
 
 // Matches Blockchain Logs: pull enough history that anchored records from
@@ -28,6 +29,12 @@ import { getAnchoredRecords, getRecords, verifyRecord } from '../services/api.js
 // getAnchoredRecords() below, which is unbounded.
 const RECORDS_LIMIT = 500
 
+// The Anchored filter's fetch is unbounded on the backend (by design - it must
+// reach anchored records older than any window), so the picker only lists the
+// newest this-many of them. The filter's "N of M" counter still shows the true
+// total, so it reads as a window, not as the whole set.
+const ANCHORED_VIEW_LIMIT = 50
+
 export default function Verification() {
   const { events } = useEventStream()
 
@@ -36,6 +43,9 @@ export default function Verification() {
   const [recordsError, setRecordsError] = useState(null)
   const [selectedId, setSelectedId] = useState(null)
   const [filter, setFilter] = useState('all')
+  // The board's stored demo estimates: listed in the "All" view as non-selectable
+  // "Demo" rows (no hash, not anchored, never passed to verifyRecord()).
+  const demoReadings = useDemoReadings()
 
   const [result, setResult] = useState(null)
   const [pending, setPending] = useState(false)
@@ -94,9 +104,14 @@ export default function Verification() {
   // Filter is display-only over data already fetched; the selected-record
   // lookup checks both fetches so a selection survives toggling even when
   // it came from the Anchored filter's separate, unbounded record set.
-  const visibleRecords = filter === 'anchored' ? anchoredRecords : filterByAnchor(records, filter)
+  // anchoredRecords arrives newest first, so slice() keeps the 50 most recent.
+  const visibleRecords =
+    filter === 'anchored' ? anchoredRecords.slice(0, ANCHORED_VIEW_LIMIT) : filterByAnchor(records, filter)
   const selectedRecord =
     records.find((r) => r.id === selectedId) ?? anchoredRecords.find((r) => r.id === selectedId) ?? null
+  // Demo rows only appear in the "All" view; anchored/pending are about real records.
+  const pickerRows = filter === 'all' ? mergeWithDemo(visibleRecords, demoReadings) : visibleRecords
+  const demoRowCount = pickerRows.length - visibleRecords.length
 
   return (
     <div className="page">
@@ -114,12 +129,19 @@ export default function Verification() {
           visibleCount={visibleRecords.length}
           totalCount={filter === 'anchored' ? anchoredRecords.length : records.length}
         />
+        {demoRowCount > 0 && (
+          <p className="dim">
+            Includes {demoRowCount} live reading{demoRowCount === 1 ? '' : 's'} from the board (shown as
+            demo ppm): hashed and anchored like the others, but they are demo estimates outside the
+            verifiable records, so they cannot be selected here.
+          </p>
+        )}
         <div className="card">
-          {!recordsError && (records.length > 0 || anchoredRecords.length > 0) && visibleRecords.length === 0 ? (
+          {!recordsError && (records.length > 0 || anchoredRecords.length > 0) && pickerRows.length === 0 ? (
             <EmptyState>No {filter === 'anchored' ? 'anchored' : 'pending'} records in view.</EmptyState>
           ) : (
             <RecordPicker
-              records={visibleRecords}
+              records={pickerRows}
               selectedId={selectedId}
               onSelect={setSelectedId}
               error={recordsError}
